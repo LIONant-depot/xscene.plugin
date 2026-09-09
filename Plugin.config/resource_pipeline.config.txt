@@ -7,7 +7,7 @@
   "PipelinePlugin/TypeName"                  ;string "Scene"
   "PipelinePlugin/FileExtension"             ;wstring ""
   "PipelinePlugin/TypeGUID/Value"            ;u64    #82D2BE43028DD6CF
-  "PipelinePlugin/Icon"                      ;string "\xEE\xB0\x88"
+  "PipelinePlugin/IconPath"                      ;wstring "icon.png"
   "PipelinePlugin/Details/RunAfter[]"        ;s64    0
   "PipelinePlugin/Details/CompilationScript" ;wstring ""
   "PipelinePlugin/Details/DebugCompiler"     ;wstring ""
