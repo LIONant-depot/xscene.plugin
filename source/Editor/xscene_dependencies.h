@@ -272,4 +272,10 @@ namespace xscene
     // this file remains the one umbrella #include, unchanged from the outside. Mechanical move only
     // - no behavior change; see each file's own top comment.
     //---------------------------------------------------------------------------
+
+    // Whether the live component registry knows a component type: what a scene's component dependencies are checked against.
+    inline bool IsComponentInLiveRegistry( xecs::component::type::guid Guid ) noexcept
+    {
+        return xecs::component::mgr::findComponentTypeInfo(Guid) != nullptr;
+    }
 }

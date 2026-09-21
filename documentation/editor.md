@@ -44,7 +44,7 @@ Guids and ids travel on the command line as hex, and free text as base64 (`xscen
 | `xscene_context.h` | `scene_state`, `scene_context` |
 | `xscene_component_display.h` | each loaded component's category and priority, filled by the editor from the game module |
 | `xscene_scene_ops.h` | minting entity and folder ids, folder membership, releasing a scene |
-| `xscene_dependencies.h` | opening a scene with its parents, and refusing dependency cycles |
+| `xscene_dependencies.h` | opening a scene with its parents, refusing dependency cycles, and whether the live registry knows a component |
 | `xscene_prefab_overrides.h`, `xscene_prefab_authoring.h` | prefab lookup and override bookkeeping; creating, instancing and deleting prefabs |
 | `xscene_create_menu.h` | the New Entity / New Folder menu items |
 | `xscene_entity_inspector_bridge.h` | wires the property inspector to the override and entity-reference commands |
