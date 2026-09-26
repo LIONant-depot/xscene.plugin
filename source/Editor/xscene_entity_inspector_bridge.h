@@ -221,7 +221,7 @@ namespace xscene
             // nameable) - one shared exclusion list, not two independently maintained ones. Only
             // records the request (m_pPendingRemoveComponent); the actual AddOrRemoveComponents call
             // happens after the inspector's Show(...) returns for this frame.
-            m_OnComponentHeaderRender = [this](xproperty::inspector&, const xproperty::type::object&, void* pInstance)
+            m_OnComponentHeaderRender = [this, &Ed](xproperty::inspector&, const xproperty::type::object&, void* pInstance)
             {
                 auto It = m_ComponentMap.find(pInstance);
                 if (It == m_ComponentMap.end()) return;
@@ -240,7 +240,19 @@ namespace xscene
                 // fires) has no such staleness, so compute the absolute position from that instead.
                 const ImVec2 RowPos = ImGui::GetCursorScreenPos();
                 const float  AvailW = ImGui::GetContentRegionAvail().x;
-                ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
+                // SHARE: the right-side label identifies the component while [S] remains a
+                // drag source into Resource View (creates SharedComponentTemplate).
+                // Delete [X] stays a click button immediately to its right.
+                const bool bIsShare = (pInfo->m_TypeID == xecs::component::type::id::SHARE);
+                // Keep the SHARE marker flush with the value-column divider, while the
+                // action buttons remain right-aligned in that same column.
+                const float RightEdgePad = 5.0f;
+                const float ButtonGap = 4.0f;
+                const float SmallButtonWidth = ImGui::CalcTextSize("S").x
+                                             + ImGui::GetStyle().FramePadding.x * 2.0f;
+                const float ShareButtonsWidth = SmallButtonWidth * 2.0f + ButtonGap;
+                if (!bIsShare)
+                    ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
                 // Borderless/transparent-at-rest, only picking up a background on hover - matches
                 // Unity's own small inline toolbar icon buttons (direct user comparison screenshot:
                 // a bordered gray box vs Unity's flat "?"/drag-handle/"..." icons that only highlight
@@ -248,6 +260,32 @@ namespace xscene
                 // hover feedback itself still reads as a real button, just not a boxed one at rest.
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                if (bIsShare)
+                {
+                    // TextDisabled is the Level Editor theme's darker grey (#7A7A7A),
+                    // keeping the SHARE marker distinct without changing the DnD button.
+                    ImGui::SetCursorScreenPos(RowPos);
+                    ImGui::TextDisabled("Shared Component");
+                    ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - RightEdgePad - ShareButtonsWidth, RowPos.y));
+                    ImGui::SmallButton("S");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Drag onto a Resource folder to save as Shared-Component Template");
+                    // Gated BeginDragDropSource (same 12px pattern as asset browser / source control) so a
+                    // plain click does not swallow the item; only a real drag starts the export payload.
+                    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 12.0f)
+                        && ImGui::BeginDragDropSource())
+                    {
+                        xscene::share_template_drag_payload_t Payload{
+                            Ed.m_State.m_SelectedEntityScene,
+                            Ed.m_State.m_SelectedEntityId,
+                            pInfo->m_Guid.m_Value
+                        };
+                        ImGui::SetDragDropPayload("XSCENE_SHARE_TEMPLATE_DRAG", &Payload, sizeof(Payload));
+                        ImGui::Text("Save %s as Shared-Component Template", pInfo->m_pName ? pInfo->m_pName : "Share");
+                        ImGui::EndDragDropSource();
+                    }
+                    ImGui::SameLine(0.0f, 4.0f);
+                }
                 if (ImGui::SmallButton("X")) m_pPendingRemoveComponent = pInfo;
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
@@ -397,13 +435,8 @@ namespace xscene
                 if (State.m_SelectedEntity.isValid() == false) return;
 
                 auto* pInfo = static_cast<const xecs::component::type::info*>(pUserData);
-                auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(State.m_SelectedEntity);
-                if (Details.m_pPool == nullptr) return;
-
-                const auto iType = Details.m_pPool->findIndexComponentFromInfo(*pInfo);
-                if (iType < 0) return;
-
-                auto* pData = &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * pInfo->m_Size];
+                auto* pData = static_cast<std::byte*>(xscene::ResolveComponentPointer(GameMgr, State.m_SelectedEntity, *pInfo));
+                if (pData == nullptr) return;
                 pObject = pData;
 
                 // Keyed by the freshly-resolved real pointer, matching what m_OnOverrideCheck/

@@ -9,7 +9,7 @@
 //
 // Meant to be included via the umbrella (xscene_entity_inspector_bridge.h) only, after
 // scene_state, g_ComponentDisplayInfo, and command infrastructure are defined.
-// Not designed to be included standalone. Not a docked editor window — Entity
+// Not designed to be included standalone. Not a docked editor window â€” Entity
 // Properties opens this as an ImGui popup that replaces the old BeginCombo list.
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
@@ -45,18 +45,27 @@ namespace xscene
             int                                 m_Priority = 0;
         };
 
-        // Registry (not the entity DataSpan) — same source as the old BeginCombo list.
+        // Registry (not the entity DataSpan) â€” same source as the old BeginCombo list.
         std::vector<component_entry> Available;
         Available.reserve(xecs::component::mgr::s_Registry.m_ComponentInfoMap.size());
 
         for (auto& Pair : xecs::component::mgr::s_Registry.m_ComponentInfoMap)
         {
             auto* pInfo = Pair.second;
-            if (pInfo->m_TypeID != xecs::component::type::id::DATA) continue;
+            // DATA + SHARE (V1 SharedComponentTemplate pipeline: share components are addable like data).
+            if (pInfo->m_TypeID != xecs::component::type::id::DATA
+                && pInfo->m_TypeID != xecs::component::type::id::SHARE) continue;
             if (xscene::IsInternalComponent(pInfo)) continue;
-            // findIndexComponentFromInfo, not getComponentBits().getBit() — see
+            // findIndexComponentFromInfo, not getComponentBits().getBit() â€” see
             // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md.
             if (pPool->findIndexComponentFromInfo(*pInfo) >= 0) continue;
+            if (pInfo->m_TypeID == xecs::component::type::id::SHARE && pPool->m_pMyFamily)
+            {
+                bool bHasShare = false;
+                for (auto* pShareInfo : pPool->m_pMyFamily->m_ShareInfos)
+                    if (pShareInfo && pShareInfo->m_Guid.m_Value == pInfo->m_Guid.m_Value) { bHasShare = true; break; }
+                if (bHasShare) continue;
+            }
 
             const char* pName = pInfo->m_pName ? pInfo->m_pName : "";
             if (bHasSearch && !xeditor::ContainsCaseInsensitive(pName, State.m_ComponentSelectorSearchString))

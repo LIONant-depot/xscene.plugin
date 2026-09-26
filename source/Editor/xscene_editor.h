@@ -1,4 +1,4 @@
-#ifndef XSCENE_EDITOR_H
+﻿#ifndef XSCENE_EDITOR_H
 #define XSCENE_EDITOR_H
 #pragma once
 
@@ -22,6 +22,7 @@
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_scene_organization.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_apply_overrides.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_make_prefab.h"
+#include "plugins/xscene.plugin/source/Editor/xscene_shared_component_template.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_entity_inspector_bridge.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_panel_component_selector.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_panel_entity_properties.h"

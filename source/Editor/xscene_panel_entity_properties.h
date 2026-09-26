@@ -1,4 +1,4 @@
-#ifndef XSCENE_PANEL_ENTITY_PROPERTIES_H
+﻿#ifndef XSCENE_PANEL_ENTITY_PROPERTIES_H
 #define XSCENE_PANEL_ENTITY_PROPERTIES_H
 #pragma once
 
@@ -73,12 +73,15 @@ namespace xscene
                     DataSpan   = pArchetype->getDataComponentInfos();
                 };
 
-                // Popup selector (grouped + searchable) — replaces the flat BeginCombo list.
+                // Popup selector (grouped + searchable) â€” replaces the flat BeginCombo list.
                 // OpenPopup/BeginPopup share this panel's ID stack (see Error popup comments in kit).
                 {
                     constexpr const char* kAddComponentPopupId = "AddComponentPopup";
                     if (ImGui::Button("Add Component"))
                         ImGui::OpenPopup(kAddComponentPopupId);
+                    // Drop a SharedComponentTemplate resource here to add+intern from serialized values.
+                    if (xscene::TryAcceptSharedComponentTemplateDrop(Ed))
+                        RefreshEntityView();
 
                     ImGui::SetNextWindowSize(ImVec2(320.0f, 360.0f), ImGuiCond_Appearing);
                     if (ImGui::BeginPopup(kAddComponentPopupId))
@@ -108,7 +111,7 @@ namespace xscene
                             {
                                 xeditor::Run(Ed.m_Undo, std::format("ApplyOverrides -Scene {} -Id {}", SceneHex, RootHex));
                             }
-                            // Tooltip (only show when hovering) — same format as Play transport buttons
+                            // Tooltip (only show when hovering) â€” same format as Play transport buttons
                             if (ImGui::IsItemHovered())
                             {
                                 ImGui::BeginTooltip();
@@ -210,6 +213,16 @@ namespace xscene
                     // construction, so Transform/Name stay pinned at the top exactly as they are
                     // today without needing to touch their own definitions.
                     std::vector<const xecs::component::type::info*> SortedComponents(DataSpan.begin(), DataSpan.end());
+                    // SHARE components (pool family) - shown like data components; Save-as-template button is SHARE-only.
+                    if (pDetails->m_pPool->m_pMyFamily)
+                    {
+                        for (auto* pShareInfo : pDetails->m_pPool->m_pMyFamily->m_ShareInfos)
+                        {
+                            if (pShareInfo == nullptr) continue;
+                            if (std::find(SortedComponents.begin(), SortedComponents.end(), pShareInfo) == SortedComponents.end())
+                                SortedComponents.push_back(pShareInfo);
+                        }
+                    }
                     std::erase_if(SortedComponents, [&](const xecs::component::type::info* pInfo) noexcept
                     {
                         if (State.m_ComponentCategoryFilter.empty()) return false;
@@ -233,7 +246,7 @@ namespace xscene
                         if (xscene::IsInternalComponent(pInfo)) continue;
                         if (pInfo->m_pPropertyTable == nullptr) continue;
 
-                        if (pDetails->m_pPool->findIndexComponentFromInfo(*pInfo) < 0) continue; // not actually present
+                        if (xscene::ResolveComponentPointer(GameMgr, State.m_SelectedEntity, *pInfo) == nullptr) continue; // not actually present (DATA or SHARE)
 
                         // pBase is a FAKE pointer (nullptr, never dereferenced) - pInfo is the stable
                         // identity carried as pUserData instead. The REAL pointer into pool memory is
@@ -300,6 +313,7 @@ namespace xscene
                     Bridge.m_pPendingRemoveComponent = nullptr;
                     RefreshEntityView();
                 }
+
             }
         }
                 if (bWindowVisible && bReadOnly) ImGui::EndDisabled();

@@ -51,9 +51,27 @@ namespace xscene::commands
         auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Out.m_Entity);
         if (!Details.m_pPool) { Out.m_pInfo = nullptr; return Out; }
         const auto iType = Details.m_pPool->findIndexComponentFromInfo(*Out.m_pInfo);
-        if (iType < 0) { Out.m_pInfo = nullptr; return Out; }
-
-        Out.m_pInstance = &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * Out.m_pInfo->m_Size];
+        if (iType >= 0)
+        {
+            Out.m_pInstance = &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * Out.m_pInfo->m_Size];
+            return Out;
+        }
+        // SHARE components live on a share-entity referenced by the pool family, not in the entity data pool.
+        if (Out.m_pInfo->m_TypeID == xecs::component::type::id::SHARE && Details.m_pPool->m_pMyFamily)
+        {
+            auto* pFamily = Details.m_pPool->m_pMyFamily;
+            for (int i = 0, end = static_cast<int>(pFamily->m_ShareInfos.size()); i < end; ++i)
+            {
+                if (pFamily->m_ShareInfos[i]->m_Guid.m_Value != Out.m_pInfo->m_Guid.m_Value) continue;
+                auto& ShareDetails = Ed.World().m_ComponentMgr.getEntityDetails(pFamily->m_ShareDetails[i].m_Entity);
+                if (!ShareDetails.m_pPool) break;
+                const auto iShare = ShareDetails.m_pPool->findIndexComponentFromInfo(*Out.m_pInfo);
+                if (iShare < 0) break;
+                Out.m_pInstance = &ShareDetails.m_pPool->m_pComponent[iShare][ShareDetails.m_PoolIndex.m_Value * Out.m_pInfo->m_Size];
+                return Out;
+            }
+        }
+        Out.m_pInfo = nullptr;
         return Out;
     }
 
@@ -63,6 +81,29 @@ namespace xscene::commands
     // RemovePropertyOverride's own comment) without duplicating the decode/setProperty call.
     inline void SetLivePropertyValue(const resolved_property_target& Target, const std::string& Path, std::uint32_t TypeGuid, const std::string& ValueStr) noexcept
     {
+        if (!Target.m_pInfo || !Target.m_pInstance) return;
+
+        // SHARE: never mutate the interned value in place (would affect every entity sharing it).
+        // Copy-on-write re-intern via getOrCreatePoolFamilyFromSameArchetype + MoveIn.
+        if (Target.m_pInfo->m_TypeID == xecs::component::type::id::SHARE)
+        {
+            auto* pCtx = xscene::FindSceneContext();
+            if (!pCtx) return;
+
+            std::vector<std::byte> Temp(Target.m_pInfo->m_Size);
+            std::memcpy(Temp.data(), Target.m_pInstance, Target.m_pInfo->m_Size);
+
+            xproperty::any Value;
+            std::string    ValueStrMutable = ValueStr;
+            xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
+            std::string SetError;
+            xproperty::settings::context Context;
+            xproperty::sprop::setProperty(SetError, Temp.data(), *Target.m_pInfo->m_pPropertyTable, xproperty::sprop::container::prop{ Path, Value }, Context);
+
+            pCtx->World().ReinternShareComponent(Target.m_Entity, *Target.m_pInfo, Temp.data());
+            return;
+        }
+
         xproperty::any Value;
         std::string    ValueStrMutable = ValueStr; // StringToAny takes a non-const span
         xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
