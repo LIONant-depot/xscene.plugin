@@ -21,6 +21,7 @@
 // Cmd.m_NewValue, from the ORDINARY per-row commit path, not the bracket) - no suppression flag
 // needed because this path never fires m_OnChangeEvent again in the first place.
 #include "plugins/xscene.plugin/source/Editor/xscene_command_context.h"
+#include "dependencies/xLIONCore/src/transform/xlioncore_transform.h"
 
 namespace xscene::commands
 {
@@ -75,6 +76,43 @@ namespace xscene::commands
         return Out;
     }
 
+    // Every unregistered enum shares TypeGuid 1 (var_type<T>'s own add_unregistered_enum<true,T>
+    // specialization, my_properties.h) - StringToAny has no case for it and hits its own
+    // `default: assert(false)`, because a bare TypeGuid can never carry a SPECIFIC enum's
+    // m_RegisteredEnumSpan. FormatPropertyValue (xscene_command_context.h) already prints an enum as
+    // its item name via any::isEnum()/getEnumString() - this is the write-side counterpart: read the
+    // CURRENT live value with the same xproperty::sprop::collector walk m_OnOverrideReset already uses
+    // (xscene_entity_inspector_bridge.h) to get an any carrying the real m_pType (and its enum span),
+    // match ValueStr against an enum_item name (numeric fallback for anything that isn't one), and
+    // overwrite the any's raw bytes in place - safe because an enum's storage is POD, the same
+    // guarantee any::getCastValue's own read-side switch on m_pType->m_Size already relies on.
+    inline bool ResolveEnumAny(void* pInstance, const xproperty::type::object& Obj, const std::string& Path, const std::string& ValueStr, xproperty::any& OutValue) noexcept
+    {
+        xproperty::settings::context Context;
+        bool bFound = false;
+        xproperty::sprop::collector(pInstance, Obj, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+        {
+            if (Path == pPropertyName) { OutValue = std::move(Data); bFound = true; }
+        });
+        if (!bFound || !OutValue.isEnum()) return false;
+
+        std::uint32_t EnumValue = static_cast<std::uint32_t>(std::strtoul(ValueStr.c_str(), nullptr, 10));
+        for (auto& E : OutValue.getEnumSpan())
+        {
+            if (ValueStr == E.m_pName) { EnumValue = E.m_Value; break; }
+        }
+
+        switch (OutValue.m_pType->m_Size)
+        {
+        case 1: OutValue.storageAs<std::uint8_t>()  = static_cast<std::uint8_t>(EnumValue);  break;
+        case 2: OutValue.storageAs<std::uint16_t>() = static_cast<std::uint16_t>(EnumValue); break;
+        case 4: OutValue.storageAs<std::uint32_t>() = static_cast<std::uint32_t>(EnumValue); break;
+        case 8: OutValue.storageAs<std::uint64_t>() = static_cast<std::uint64_t>(EnumValue); break;
+        default: assert(false); break;
+        }
+        return true;
+    }
+
     // Sets the LIVE property value only (StringToAny-decode + xproperty::sprop::setProperty) - no
     // override bookkeeping at all. Split out from the old, single ApplyPropertyAndRecordOverride so
     // Undo can also reach the "set the value, then REMOVE the override" path below (see
@@ -94,8 +132,15 @@ namespace xscene::commands
             std::memcpy(Temp.data(), Target.m_pInstance, Target.m_pInfo->m_Size);
 
             xproperty::any Value;
-            std::string    ValueStrMutable = ValueStr;
-            xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
+            if (TypeGuid == 1)
+            {
+                if (!ResolveEnumAny(Temp.data(), *Target.m_pInfo->m_pPropertyTable, Path, ValueStr, Value)) return;
+            }
+            else
+            {
+                std::string ValueStrMutable = ValueStr;
+                xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
+            }
             std::string SetError;
             xproperty::settings::context Context;
             xproperty::sprop::setProperty(SetError, Temp.data(), *Target.m_pInfo->m_pPropertyTable, xproperty::sprop::container::prop{ Path, Value }, Context);
@@ -105,8 +150,15 @@ namespace xscene::commands
         }
 
         xproperty::any Value;
-        std::string    ValueStrMutable = ValueStr; // StringToAny takes a non-const span
-        xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
+        if (TypeGuid == 1)
+        {
+            if (!ResolveEnumAny(Target.m_pInstance, *Target.m_pInfo->m_pPropertyTable, Path, ValueStr, Value)) return;
+        }
+        else
+        {
+            std::string ValueStrMutable = ValueStr; // StringToAny takes a non-const span
+            xproperty::settings::StringToAny(Value, TypeGuid, std::span<char>(ValueStrMutable.data(), ValueStrMutable.size()));
+        }
 
         std::string SetError;
         xproperty::settings::context Context;
@@ -264,6 +316,18 @@ namespace xscene::commands
 
             SetLivePropertyValue(Target, Path, TypeGuid, After);
             RecordPropertyOverride(SceneContext(), Target, SceneGuid, Id, Path, After);
+
+            // Demote-on-live-move only applies to Transform edits - see DemoteStaticIfPlaying's own
+            // comment (xscene_command_context.h). A raw `Target.m_pInfo == &info_v<xlioncore::transform>`
+            // pointer-identity check silently never matched here (confirmed live: two different
+            // addresses, one in an exe range, one in a dll range - info_v<T> is a per-binary singleton,
+            // see its own declaration comment in xecs_component_type.h), no-op'ing every
+            // SetProperty-driven demote until fixed. IsComponentType<T>() is xECSV2's own sanctioned
+            // replacement for exactly this - a runtime-discovered info* against a compile-time-known
+            // T, by GUID instead of by address (see its own declaration comment, right next to info_v).
+            if (xecs::component::type::IsComponentType<xlioncore::transform>(Target.m_pInfo))
+                DemoteStaticIfPlaying(SceneContext(), SceneGuid, Id);
+
             return {};
         }
 

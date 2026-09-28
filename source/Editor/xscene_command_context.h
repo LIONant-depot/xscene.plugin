@@ -5,6 +5,7 @@
 #include "dependencies/xundo/source/xundo_system.h"
 #include "dependencies/xeditor/include/xeditor/commands.h"
 #include "dependencies/xeditor/include/xeditor/serialize.h"
+#include "dependencies/xLIONCore/src/tags/xlioncore_tags.h"
 
 namespace xscene::commands
 {
@@ -170,5 +171,62 @@ namespace xscene::commands
         return xproperty::settings::AnyToString(Buffer, Data);
     }
 
+    // Direct user design (2026-09-29): moving a static entity's Transform while Playing must not
+    // silently desync visuals (Render reads Transform directly, unaffected by static_tag) from physics
+    // (statics are excluded from Physics's own per-frame scan - xlioncore_physics_system.h - so it
+    // would never notice a live move). Demoting to Kinematic instead reuses the exact same
+    // static/dynamics/kinematic resolution box3d_body already has - no new mechanism, Physics's
+    // regular scan just picks the entity back up next tick and pushes the moved pose into Box3D
+    // correctly. Safe by construction: any edit made while Playing is discarded on Stop (StopPlay does
+    // a full GameMgr rebuild + reload from disk - xlevel_session.h) unless explicitly kept via "Keep
+    // Play Mode Changes" - this demotion reverts right along with everything else, matching Unity's
+    // own "Play Mode changes don't persist" convention.
+    //
+    // Deliberately NOT xscene_commands_component_edit.h's MigrateEntityComponents (same shape, scene
+    // map re-pointing included) - that file already includes THIS one, so calling it from here would
+    // be circular. Small enough to inline directly rather than restructure the include graph for it.
+    // Not undo-routed: an implicit side effect of an edit that's already its own undo step, not a
+    // separate user action.
+    inline void DemoteStaticIfPlaying(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id) noexcept
+    {
+        if (!Ed.World().m_isRunning) return;
+
+        auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);
+        if (!pScene) return;
+        auto It = pScene->m_LocalToRuntime.find(Id);
+        if (It == pScene->m_LocalToRuntime.end()) return;
+        const auto OldEntity = It->second;
+
+        // info_v<xlioncore::static_tag> is a per-BINARY compile-time singleton (xecs_component_type.h's
+        // own comment) - this file compiles into xscene.plugin/xLION.exe, a DIFFERENT binary than
+        // xLIONCore.dll, where static_tag is actually registered. Raw .m_BitID off this binary's own
+        // copy is safe to read directly here (no per-call registry lookup needed) because
+        // xlevel_session.h's RegisterHostSystems calls SyncLocalBitIDs<xlioncore::static_tag,
+        // xlioncore::transform>() once, right after Lock, specifically so this binary's copies of
+        // these two cross-referenced types stay correct - see that call site's own comment for the
+        // full story (this used to resolve through findComponentTypeInfo every call instead, before
+        // that root-cause fix landed).
+        auto* pStaticTagInfo = &xecs::component::type::info_v<xlioncore::static_tag>;
+
+        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(OldEntity);
+        if (!Details.m_pPool) return;
+        // Tags have no pool storage - findIndexComponentFromInfo is always -1 for one (see
+        // xecs_tag_components_bits_only, the same lesson static_tag's own Inspector-chip and Add
+        // Component checks already had to learn tonight). Presence is archetype bits only.
+        if (!Details.m_pPool->m_pArchetype->getComponentBits().getBit(pStaticTagInfo->m_BitID)) return;
+
+        std::array<const xecs::component::type::info*, 1> Sub{ pStaticTagInfo };
+        const auto NewEntity = Ed.World().AddOrRemoveComponents(OldEntity, std::span<const xecs::component::type::info* const>{}, std::span<const xecs::component::type::info* const>{ Sub });
+
+        pScene->m_RuntimeToLocal.erase(OldEntity.m_Value);
+        pScene->m_LocalToRuntime[Id]                = NewEntity;
+        pScene->m_RuntimeToLocal[NewEntity.m_Value] = Id;
+
+        if (Ed.m_State.m_SelectedEntityId == Id && Ed.m_State.m_SelectedEntityScene == SceneGuid)
+        {
+            Ed.m_State.m_SelectedEntity        = NewEntity;
+            Ed.m_State.m_bEntityInspectorDirty = true;
+        }
+    }
 }
 

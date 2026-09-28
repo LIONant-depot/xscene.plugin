@@ -123,17 +123,23 @@ namespace xscene
     // editor::prefab_instance is this editor's own override-tracking bookkeeping, edited only through
     // the dedicated prefab-override UI. Centralized here so Add/Remove Component and the inspector
     // rebuild loop can't independently drift out of sync on this list.
+    // IsComponentType<T>() (xecs_component_type.h) compares by GUID, not by info_v<T> address - safe
+    // regardless of which binary ends up owning each of these 9 built-ins' registration, unlike a raw
+    // `pInfo == &info_v<T>` (which happens to hold today only because everything below is compiled
+    // into this one host exe - see IsComponentType's own comment for the two live bugs elsewhere in
+    // this codebase where that assumption silently broke instead).
     bool IsInternalComponent(const xecs::component::type::info* pInfo) noexcept
     {
-        return pInfo == &xecs::component::type::info_v<xecs::component::entity>
-            || pInfo == &xecs::component::type::info_v<xecs::component::parent>
-            || pInfo == &xecs::component::type::info_v<xecs::component::children>
-            || pInfo == &xecs::component::type::info_v<xecs::component::ref_count>
-            || pInfo == &xecs::component::type::info_v<xecs::component::share_filter>
-            || pInfo == &xecs::component::type::info_v<xecs::component::share_as_data_exclusive_tag>
-            || pInfo == &xecs::component::type::info_v<xecs::prefab::tag>
-            || pInfo == &xecs::component::type::info_v<xecs::prefab::root>
-            || pInfo == &xecs::component::type::info_v<xecs::editor::prefab_instance>;
+        using xecs::component::type::IsComponentType;
+        return IsComponentType<xecs::component::entity>(pInfo)
+            || IsComponentType<xecs::component::parent>(pInfo)
+            || IsComponentType<xecs::component::children>(pInfo)
+            || IsComponentType<xecs::component::ref_count>(pInfo)
+            || IsComponentType<xecs::component::share_filter>(pInfo)
+            || IsComponentType<xecs::component::share_as_data_exclusive_tag>(pInfo)
+            || IsComponentType<xecs::prefab::tag>(pInfo)
+            || IsComponentType<xecs::prefab::root>(pInfo)
+            || IsComponentType<xecs::editor::prefab_instance>(pInfo);
     }
 
 
