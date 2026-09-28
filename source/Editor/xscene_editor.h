@@ -15,6 +15,7 @@
 #include "plugins/xscene.plugin/source/Editor/xscene_command_context.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_create_menu.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_property_edit.h"
+#include "plugins/xscene.plugin/source/Editor/xscene_commands_transform_gizmo.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_entity_reference.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_entity_lifecycle.h"
