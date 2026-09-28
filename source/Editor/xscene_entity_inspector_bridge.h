@@ -1,4 +1,5 @@
 #pragma once
+#include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
 
 // entity_inspector_bridge: inspector callbacks -> prefab-override and entity-reference commands.
 // Split out of xscene_entity_inspector_bridge.h; included from there at the position this code used to occupy.
@@ -38,6 +39,12 @@ namespace xscene
         // entity's archetype WHILE the inspector is still mid-iteration over this same entity's
         // component list.
         const xecs::component::type::info* m_pPendingRemoveComponent = nullptr;
+
+        // Zero-property components (real xecs tags, and any DATA component with an empty
+        // XPROPERTY_DEF like box3d_body) rendered as a compact chip row instead of going through
+        // EntityInspector's own per-component foldout - rebuilt in the same m_bEntityInspectorDirty
+        // block as SortedComponents (RenderEntityPropertiesPanel), read every frame to draw the row.
+        std::vector<const xecs::component::type::info*> m_TagComponents;
 
         std::function<void(xproperty::inspector&, const xproperty::ui::undo::cmd&)>                                                      m_OnPropertyChanged;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view, const xproperty::any&, bool&)> m_OnOverrideCheck;
@@ -289,7 +296,13 @@ namespace xscene
                 if (ImGui::SmallButton("X")) m_pPendingRemoveComponent = pInfo;
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this component from the entity");
+                if (ImGui::IsItemHovered())
+                {
+                    // Which systems stop/start running on this entity if it's removed.
+                    auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Ed.m_State.m_SelectedEntity);
+                    if (Details.m_pPool)
+                        ImGui::SetTooltip("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(Ed.World()), Details.m_pPool->m_pArchetype->getComponentBits(), *pInfo, false).c_str());
+                }
             };
             Inspector.m_OnComponentHeaderRender.Register(m_OnComponentHeaderRender);
 

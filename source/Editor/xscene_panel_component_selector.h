@@ -13,6 +13,7 @@
 // Properties opens this as an ImGui popup that replaces the old BeginCombo list.
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
+#include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
 #include "dependencies/xeditor/include/xeditor/widgets.h"
 #include <cstring>
 
@@ -52,13 +53,19 @@ namespace xscene
         for (auto& Pair : xecs::component::mgr::s_Registry.m_ComponentInfoMap)
         {
             auto* pInfo = Pair.second;
-            // DATA + SHARE (V1 SharedComponentTemplate pipeline: share components are addable like data).
+            // DATA + SHARE (V1 SharedComponentTemplate pipeline: share components are addable like
+            // data) + TAG (real zero-storage markers like static_tag - excluding them here predates
+            // any tag component existing at all; direct user report: "I do not see any component tag
+            // in the list of components").
             if (pInfo->m_TypeID != xecs::component::type::id::DATA
-                && pInfo->m_TypeID != xecs::component::type::id::SHARE) continue;
+                && pInfo->m_TypeID != xecs::component::type::id::SHARE
+                && pInfo->m_TypeID != xecs::component::type::id::TAG) continue;
             if (xscene::IsInternalComponent(pInfo)) continue;
             // findIndexComponentFromInfo, not getComponentBits().getBit() â€” see
             // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md.
             if (pPool->findIndexComponentFromInfo(*pInfo) >= 0) continue;
+            // Tags have no pool storage (stripped from the archetype's info array) - presence is bits-only.
+            if (pInfo->m_TypeID == xecs::component::type::id::TAG && pPool->m_pArchetype->getComponentBits().getBit(pInfo->m_BitID)) continue;
             if (pInfo->m_TypeID == xecs::component::type::id::SHARE && pPool->m_pMyFamily)
             {
                 bool bHasShare = false;
@@ -113,6 +120,8 @@ namespace xscene
         }
 
         bool bAdded = false;
+        const auto  Systems = xscene::system_usage::AllSystems(Ed.World());
+        const auto& Bits    = pPool->m_pArchetype->getComponentBits();
 
         ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 8.0f);
         ImGui::BeginChild("##ComponentSelectorList", ImVec2(0, 0), ImGuiChildFlags_None);
@@ -145,7 +154,21 @@ namespace xscene
             for (auto& Comp : Group.m_Components)
             {
                 ImGui::PushID(Comp.m_pInfo->m_pName);
-                if (ImGui::Selectable(Comp.m_pInfo->m_pName))
+                const bool bClicked = ImGui::Selectable(Comp.m_pInfo->m_pName);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true).c_str());
+
+                // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
+                if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *Comp.m_pInfo, true); !Change.empty())
+                {
+                    std::string Hint;
+                    if (!Change.m_Starts.empty()) Hint += "+" + xscene::system_usage::JoinNames(Change.m_Starts);
+                    if (!Change.m_Stops.empty())  Hint += std::string(Hint.empty() ? "" : "  ") + "-" + xscene::system_usage::JoinNames(Change.m_Stops);
+                    ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(Hint.c_str()).x);
+                    ImGui::TextDisabled("%s", Hint.c_str());
+                }
+
+                if (bClicked)
                 {
                     xeditor::Run(Ed.m_Undo, std::format("AddComponent -Scene {} -Id {} -Component {:016X}"
                         , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)

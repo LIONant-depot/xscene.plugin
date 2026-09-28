@@ -125,6 +125,33 @@ namespace xscene::commands
     // here (the xECS consumer layer), matching the same layering the var_type<> bridge
     // itself already established, rather than teaching the shared xproperty lib about a type it's
     // architecturally not allowed to know about.
+    inline bool bIsAnyToStringSafeType(std::uint32_t GUID) noexcept
+    {
+        return GUID == xproperty::settings::var_type<std::int32_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::uint32_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::int16_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::uint16_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::int8_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::uint8_t>::guid_v
+            || GUID == xproperty::settings::var_type<float>::guid_v
+            || GUID == xproperty::settings::var_type<double>::guid_v
+            || GUID == xproperty::settings::var_type<std::string>::guid_v
+            || GUID == xproperty::settings::var_type<std::wstring>::guid_v
+            || GUID == xproperty::settings::var_type<std::uint64_t>::guid_v
+            || GUID == xproperty::settings::var_type<std::int64_t>::guid_v
+            || GUID == xproperty::settings::var_type<bool>::guid_v
+            || GUID == xproperty::settings::var_type<xresource::full_guid>::guid_v
+            ;
+    }
+
+    // AnyToString (my_properties.h, shared xproperty lib) asserts(false) on any type outside its own
+    // fixed atomic list - by design, meant to catch a genuinely new atomic type nobody taught it to
+    // print yet (xPropertyImGuiInspector.cpp's own bIsSnapshotableType guards its one internal caller
+    // the same way, with the identical comment). FormatPropertyValue is xscene's only other caller and
+    // had no such guard - confirmed live as a real Debug-build crash the moment a property whose value
+    // isn't one of those atomic types (a compound/vector-valued leaf, an enum-backed virtual property,
+    // etc.) reached here. Mirrors the existing xecs::component::entity special-case below: unknown
+    // types now degrade to a placeholder instead of crashing the whole editor.
     inline int FormatPropertyValue(std::span<char> Buffer, const xproperty::any& Data) noexcept
     {
         if (Data.getTypeGuid() == xproperty::settings::var_type<xecs::component::entity>::guid_v)
@@ -133,6 +160,13 @@ namespace xscene::commands
             if (!E.isValid()) return sprintf_s(Buffer.data(), Buffer.size(), "invalid");
             return sprintf_s(Buffer.data(), Buffer.size(), "runtime-entity %016llX", (unsigned long long)E.m_Value);
         }
+        if (Data.isEnum())
+        {
+            const char* pName = Data.getEnumString();
+            return pName ? sprintf_s(Buffer.data(), Buffer.size(), "%s", pName) : sprintf_s(Buffer.data(), Buffer.size(), "%u", Data.getEnumValue());
+        }
+        if (!bIsAnyToStringSafeType(Data.getTypeGuid()))
+            return sprintf_s(Buffer.data(), Buffer.size(), "<unsupported>");
         return xproperty::settings::AnyToString(Buffer, Data);
     }
 
