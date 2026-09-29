@@ -87,6 +87,7 @@ namespace xscene::commands
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
             State().m_bEntityInspectorDirty = true;
             DemoteStaticIfPlaying(SceneContext(), SceneGuid, Id);   // see its own comment, xscene_command_context.h
+            TeleportDynamicIfPlaying(SceneContext(), SceneGuid, Id, pXform->m_Position, pXform->m_Rotation);
             return {};
         }
 
@@ -159,6 +160,7 @@ namespace xscene::commands
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
             State().m_bEntityInspectorDirty = true;
             DemoteStaticIfPlaying(SceneContext(), SceneGuid, Id);   // see its own comment, xscene_command_context.h
+            TeleportDynamicIfPlaying(SceneContext(), SceneGuid, Id, pXform->m_Position, pXform->m_Rotation);
             return {};
         }
 

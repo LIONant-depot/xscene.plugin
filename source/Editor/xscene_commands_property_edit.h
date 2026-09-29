@@ -326,7 +326,11 @@ namespace xscene::commands
             // replacement for exactly this - a runtime-discovered info* against a compile-time-known
             // T, by GUID instead of by address (see its own declaration comment, right next to info_v).
             if (xecs::component::type::IsComponentType<xlioncore::transform>(Target.m_pInfo))
+            {
                 DemoteStaticIfPlaying(SceneContext(), SceneGuid, Id);
+                auto* pXform = reinterpret_cast<xlioncore::transform*>(Target.m_pInstance);
+                TeleportDynamicIfPlaying(SceneContext(), SceneGuid, Id, pXform->m_Position, pXform->m_Rotation);
+            }
 
             return {};
         }

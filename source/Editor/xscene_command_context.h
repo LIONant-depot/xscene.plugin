@@ -6,6 +6,7 @@
 #include "dependencies/xeditor/include/xeditor/commands.h"
 #include "dependencies/xeditor/include/xeditor/serialize.h"
 #include "dependencies/xLIONCore/src/tags/xlioncore_tags.h"
+#include "dependencies/xLIONCore/src/physics/xlioncore_physics_api.h"
 
 namespace xscene::commands
 {
@@ -227,6 +228,27 @@ namespace xscene::commands
             Ed.m_State.m_SelectedEntity        = NewEntity;
             Ed.m_State.m_bEntityInspectorDirty = true;
         }
+    }
+
+    // The dynamic-body counterpart to DemoteStaticIfPlaying above. Physics::OnUpdate deliberately
+    // never looks at a dynamic body's Dirty flag (a live dynamic body is physics-authoritative - see
+    // xlioncore_physics_system.h's own comment) - the editor is a privileged caller here, not
+    // gameplay code: a gizmo drag or Inspector edit while Playing is a deliberate human action, so it
+    // goes straight through xlioncore::physics::TeleportDynamicBody (ordinary cross-DLL call, not
+    // GetProcAddress - see xlioncore_physics_api.h). No-ops via that function's own checks if the
+    // entity has no live body or isn't currently Dynamic (static/kinematic already have their own
+    // paths). Position/Rotation only, not Scale - resize is collider geometry, not pose, and isn't
+    // handled for anyone yet (see xlion_construction_component_idea memory).
+    inline void TeleportDynamicIfPlaying(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, const xmath::fvec3& Position, const xmath::fquat& Rotation) noexcept
+    {
+        if (!Ed.World().m_isRunning) return;
+
+        auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);
+        if (!pScene) return;
+        auto It = pScene->m_LocalToRuntime.find(Id);
+        if (It == pScene->m_LocalToRuntime.end()) return;
+
+        xlioncore::physics::TeleportDynamicBody(Ed.World(), It->second, Position, Rotation);
     }
 }
 
