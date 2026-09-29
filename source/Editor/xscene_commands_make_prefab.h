@@ -108,6 +108,10 @@ namespace xscene::commands
             xscene::ReparentEntityIntoFolder(Scene, RootId, OriginalFolderId);
 
         xscene::AttachPrefabInstanceComponent(GameMgr, Scene, RootId, NewRoot, PrefabGuid, pState);
+
+        // RootId lives on as the new instance: cancel the delete DeleteEntitySubtree recorded for it,
+        // or SaveScene (where Deleted wins over Dirty) removes the root's entity file.
+        Scene.m_PendingChanges[RootId].m_Deleted -= 1;
         GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, RootId);
 
         if (pState)

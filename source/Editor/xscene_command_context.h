@@ -176,7 +176,7 @@ namespace xscene::commands
     // silently desync visuals (Render reads Transform directly, unaffected by static_tag) from physics
     // (statics are excluded from Physics's own per-frame scan - xlioncore_physics_system.h - so it
     // would never notice a live move). Demoting to Kinematic instead reuses the exact same
-    // static/dynamics/kinematic resolution box3d_body already has - no new mechanism, Physics's
+    // static/dynamics/kinematic resolution physics_body already has - no new mechanism, Physics's
     // regular scan just picks the entity back up next tick and pushes the moved pose into Box3D
     // correctly. Safe by construction: any edit made while Playing is discarded on Stop (StopPlay does
     // a full GameMgr rebuild + reload from disk - xlevel_session.h) unless explicitly kept via "Keep

@@ -350,7 +350,7 @@ namespace xscene
                         if (xscene::IsInternalComponent(pInfo)) continue;
                         if (pInfo->m_pPropertyTable == nullptr) continue;
 
-                        // Genuine TAG kind only (not "zero reflected properties" - box3d_body is DATA)
+                        // Genuine TAG kind only (not "zero reflected properties" - physics_body is DATA)
                         // gets the "[name][x]" chip. Checked before ResolveComponentPointer, which is
                         // always nullptr for a tag (no pool storage; presence came from archetype bits).
                         if (pInfo->m_TypeID == xecs::component::type::id::TAG)

@@ -41,7 +41,7 @@ namespace xscene
         const xecs::component::type::info* m_pPendingRemoveComponent = nullptr;
 
         // Zero-property components (real xecs tags, and any DATA component with an empty
-        // XPROPERTY_DEF like box3d_body) rendered as a compact chip row instead of going through
+        // XPROPERTY_DEF like physics_body) rendered as a compact chip row instead of going through
         // EntityInspector's own per-component foldout - rebuilt in the same m_bEntityInspectorDirty
         // block as SortedComponents (RenderEntityPropertiesPanel), read every frame to draw the row.
         std::vector<const xecs::component::type::info*> m_TagComponents;
