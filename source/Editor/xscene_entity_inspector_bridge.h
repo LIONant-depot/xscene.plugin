@@ -196,10 +196,11 @@ namespace xscene
                 const auto BaseEntity = xecs::persist::details::ResolveMemberPath(GameMgr, RootIt->second, Ctx.m_MemberPath);
                 if (BaseEntity.isValid() == false) return;
 
-                auto& RootDetails = GameMgr.m_ComponentMgr.getEntityDetails(BaseEntity);
-                const auto iType  = RootDetails.m_pPool->findIndexComponentFromInfo(*It->second);
-                if (iType < 0) return;
-                auto* pRootData = &RootDetails.m_pPool->m_pComponent[iType][RootDetails.m_PoolIndex.m_Value * It->second->m_Size];
+                // DATA components live in the entity's own pool row, SHARE components on the family's share
+                // entity - findIndexComponentFromInfo is -1 for a SHARE one, which used to make this return
+                // silently and left every overridden property of a shared component impossible to revert.
+                void* pRootData = xscene::ResolveComponentPointer(GameMgr, BaseEntity, *It->second);
+                if (pRootData == nullptr) return;
 
                 xproperty::settings::context Context;
                 xproperty::any               BaseValue;
