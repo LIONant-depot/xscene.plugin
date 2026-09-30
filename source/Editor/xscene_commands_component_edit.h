@@ -346,6 +346,11 @@ namespace xscene::commands
             auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "RemoveComponent: unknown component";
 
+            if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene)
+                if (auto It = pScene->m_LocalToRuntime.find(Id); It != pScene->m_LocalToRuntime.end())
+                    if (auto& Details = World().m_ComponentMgr.getEntityDetails(It->second); Details.m_pPool && !Details.m_pPool->m_pArchetype->getComponentBits().getBit(pInfo->m_BitID))
+                        return "RemoveComponent: the entity does not have that component";
+
             std::array<const xecs::component::type::info*, 1> Sub{ pInfo };
             const auto NewEntity = MigrateEntityComponents(SceneContext(), SceneGuid, Id, {}, Sub);
             if (!NewEntity.isValid()) return "RemoveComponent: target not found";

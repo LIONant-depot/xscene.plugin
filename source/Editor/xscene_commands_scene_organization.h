@@ -378,6 +378,8 @@ namespace xscene::commands
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "MoveToFolder: target not found";
+            if (FolderVal != xecs::scene::invalid_folder_id_v && std::ranges::find(pScene->m_Folders, FolderVal, &xecs::scene::folder::m_Id) == pScene->m_Folders.end())
+                return "MoveToFolder: folder not found";
 
             // A parented entity is never a folder member (rendered nested under its parent's own row
             // instead) - matches every existing drag-drop call site's own bHasParent check.
