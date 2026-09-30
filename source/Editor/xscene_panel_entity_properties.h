@@ -103,13 +103,16 @@ namespace xscene
     // one alongside EntityInspector and call Bridge.RegisterCallbacks(...) once at setup before
     // calling this every frame.
     //---------------------------------------------------------------------------
-    void RenderEntityPropertiesPanel(scene_context& Ed, const char* pWindowName, xproperty::inspector& EntityInspector, entity_inspector_bridge& Bridge, bool bReadOnly = false) noexcept
+    // bReadOnly: shown but not editable (no property edits, no Add/Remove Component); pReadOnlyReason, when given, says why.
+    void RenderEntityPropertiesPanel(scene_context& Ed, const char* pWindowName, xproperty::inspector& EntityInspector, entity_inspector_bridge& Bridge, bool bReadOnly = false, const char* pReadOnlyReason = nullptr) noexcept
     {
         auto& GameMgr = Ed.World();
         auto& State   = Ed.m_State;
         ImGui::SetNextWindowPos(ImVec2(18, 18), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(480, 500), ImGuiCond_FirstUseEver);
         const bool bWindowVisible = ImGui::Begin(pWindowName);
+        if (bWindowVisible && bReadOnly && pReadOnlyReason && *pReadOnlyReason)
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "%s", pReadOnlyReason);
         if (bWindowVisible && bReadOnly) ImGui::BeginDisabled();
         xeditor::diagnostics::Log("window begin: %s visible=%d", pWindowName, bWindowVisible ? 1 : 0);
         if (bWindowVisible)
