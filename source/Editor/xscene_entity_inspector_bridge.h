@@ -112,6 +112,21 @@ namespace xscene
                 if (It == m_ComponentMap.end()) return;
                 auto& State = Ed.m_State;
 
+                // An edit bracket (array insert / delete / reorder): m_Name is a label and both values
+                // are whole-component snapshots, not one property's scalar - replay them as a snapshot.
+                // (Formatting a snapshot as a scalar below overflowed the 256-byte buffers and aborted.)
+                if (Cmd.m_NewValue.is<std::string>() && Cmd.m_Original.is<std::string>() && !Cmd.m_Name.empty() && Cmd.m_Name.find('/') == std::string::npos)
+                {
+                    xeditor::Run(Ed.m_Undo, std::format("SnapshotEdit -Scene {} -Id {} -Component {:016X} -Label {} -Before {} -After {}"
+                        , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
+                        , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
+                        , It->second->m_Guid.m_Value
+                        , xeditor::Base64Encode(Cmd.m_Name)
+                        , xeditor::Base64Encode(Cmd.m_Original.get<std::string>())
+                        , xeditor::Base64Encode(Cmd.m_NewValue.get<std::string>())));
+                    return;
+                }
+
                 std::array<char, 256> BeforeBuffer{}, AfterBuffer{};
                 const auto BeforeLen = xscene::commands::FormatPropertyValue(BeforeBuffer, Cmd.m_Original);
                 const auto AfterLen  = xscene::commands::FormatPropertyValue(AfterBuffer, Cmd.m_NewValue);

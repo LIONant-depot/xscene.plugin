@@ -495,6 +495,141 @@ namespace xscene::commands
 
         xcmdline::parser::handle m_hScene, m_hId, m_hComponent, m_hPath, m_hTypeGuid, m_hBefore, m_hAfter;
     };
+
+    //================================================================================================
+    // SnapshotEdit - an Inspector edit that touched several properties of one component at once (an
+    // array insert, delete or reorder: the inspector's BeginEdit/CommitEdit bracket). The inspector
+    // reports it as two whole-component text snapshots (xproperty::ui::undo::SnapshotToString); this
+    // replays them. Same shape as the descriptor editor's own SnapshotEdit (xeditor_descriptor_editor.h).
+    //================================================================================================
+    struct snapshot_edit_cmd : scene_command
+    {
+        snapshot_edit_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SnapshotEdit", pDataBase) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override
+        {
+            return "Applies an Inspector snapshot edit to one component (undoable). Usage: SnapshotEdit -Scene hexguid -Id hexid -Component hex64 -Label base64 -Before base64 -After base64";
+        }
+        void RegisterArguments() noexcept override
+        {
+            m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits", true, 1);
+            m_hLabel     = m_Parser.addOption("Label",     "What the edit did, base64",          true, 1);
+            m_hBefore    = m_Parser.addOption("Before",    "State before, base64",               true, 1);
+            m_hAfter     = m_Parser.addOption("After",     "State after, base64",                true, 1);
+        }
+
+        void Apply(xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::uint64_t Component, const std::string& Snapshot) noexcept
+        {
+            const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, Id, Component);
+            if (!Target.m_pInfo || !Target.m_pInstance) return;
+
+            xproperty::settings::context Context;
+            if (Target.m_pInfo->m_TypeID == xecs::component::type::id::SHARE)
+            {
+                // Never mutate an interned SHARE value in place - same copy-on-write as SetLivePropertyValue.
+                std::vector<std::byte> Temp(Target.m_pInfo->m_Size);
+                std::memcpy(Temp.data(), Target.m_pInstance, Target.m_pInfo->m_Size);
+                xproperty::ui::undo::ApplySnapshotFromString(*Target.m_pInfo->m_pPropertyTable, Temp.data(), Snapshot, Context);
+                World().ReinternShareComponent(Target.m_Entity, *Target.m_pInfo, Temp.data());
+            }
+            else
+            {
+                xproperty::ui::undo::ApplySnapshotFromString(*Target.m_pInfo->m_pPropertyTable, Target.m_pInstance, Snapshot, Context);
+            }
+            World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
+            State().m_bEntityInspectorDirty = true;
+        }
+
+        std::string Redo() noexcept override
+        {
+            auto SceneArg = m_Parser.getOptionArgAs<std::string>(m_hScene, 0);
+            auto IdArg    = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
+            auto CompArg  = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
+            auto AfterArg = m_Parser.getOptionArgAs<std::string>(m_hAfter, 0);
+            if (std::holds_alternative<xerr>(SceneArg) || std::holds_alternative<xerr>(IdArg) || std::holds_alternative<xerr>(CompArg) || std::holds_alternative<xerr>(AfterArg))
+                return "SnapshotEdit: bad arguments";
+
+            const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
+            const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
+            const auto Component = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            if (!ResolvePropertyTarget(SceneContext(), SceneGuid, Id, Component).m_pInfo) return "SnapshotEdit: target not found";
+
+            Apply(SceneGuid, Id, Component, xeditor::Base64Decode(std::get<std::string>(AfterArg)));
+            return {};
+        }
+
+        void BackupCurrenState(xundo::undo_file& File) noexcept override
+        {
+            auto SceneArg  = m_Parser.getOptionArgAs<std::string>(m_hScene, 0);
+            auto IdArg     = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
+            auto CompArg   = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
+            auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
+
+            File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
+            File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
+            File.Write(std::holds_alternative<xerr>(CompArg)  ? std::uint64_t{0} : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16));
+            xeditor::WriteString(File, std::holds_alternative<xerr>(BeforeArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(BeforeArg)));
+        }
+
+        void Undo(xundo::undo_file& File) noexcept override
+        {
+            std::uint64_t Scene = 0;     File.Read(Scene);
+            std::uint32_t Id = 0;        File.Read(Id);
+            std::uint64_t Component = 0; File.Read(Component);
+            const std::string Before = xeditor::ReadString(File);
+            Apply(xecs::scene::guid{ .m_Instance = { Scene } }, static_cast<xecs::scene::permanent_id>(Id), Component, Before);
+        }
+
+        xcmdline::parser::handle m_hScene, m_hId, m_hComponent, m_hLabel, m_hBefore, m_hAfter;
+    };
+
+    //================================================================================================
+    // Property snapshots - lets any direct-manipulation tool (a viewport gizmo, a curve widget, ...)
+    // mutate a live component freely during an interaction, then commit the net result as ordinary
+    // SetProperty commands (one undo step via xeditor::RunGroup). Every leaf gets SetProperty's own
+    // prefab-override bookkeeping, dirty marking and Undo - no tool-specific command needed.
+    //================================================================================================
+    struct property_snapshot_entry
+    {
+        std::string   m_Path;
+        std::string   m_Value;
+        std::uint32_t m_TypeGuid = 0;
+    };
+    using property_snapshot = std::vector<property_snapshot_entry>;
+
+    inline property_snapshot SnapshotProperties(void* pInstance, const xproperty::type::object& Obj) noexcept
+    {
+        property_snapshot Out;
+        xproperty::settings::context Context;
+        xproperty::sprop::collector(pInstance, Obj, Context, [&](const char* pPath, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+        {
+            std::array<char, 256> Buffer{};
+            const auto Len = FormatPropertyValue(Buffer, Data);
+            Out.push_back({ pPath, std::string(Buffer.data(), Len > 0 ? static_cast<std::size_t>(Len) : 0), Data.m_pType ? Data.m_pType->m_GUID : 0u });
+        });
+        return Out;
+    }
+
+    // SetProperty command strings for every leaf whose value differs between Before and After (matched
+    // by path; array size markers and paths present on only one side are skipped - tools edit values,
+    // not structure).
+    inline std::vector<std::string> MakeSetPropertyCommands(xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::uint64_t ComponentGuid
+        , const property_snapshot& Before, const property_snapshot& After) noexcept
+    {
+        std::vector<std::string> Cmds;
+        for (const auto& A : After)
+        {
+            if (A.m_Path.ends_with("[]")) continue;
+            const auto It = std::ranges::find(Before, A.m_Path, &property_snapshot_entry::m_Path);
+            if (It == Before.end() || It->m_Value == A.m_Value) continue;
+            Cmds.push_back(std::format("SetProperty -Scene {} -Id {} -Component {:016X} -Path {} -TypeGuid {:08X} -Before {} -After {}"
+                , FormatSceneGuid(SceneGuid), FormatEntityId(Id), ComponentGuid
+                , xeditor::Base64Encode(A.m_Path), A.m_TypeGuid
+                , xeditor::Base64Encode(It->m_Value), xeditor::Base64Encode(A.m_Value)));
+        }
+        return Cmds;
+    }
 }
 
 #endif // XSCENE_COMMANDS_PROPERTY_EDIT_H
