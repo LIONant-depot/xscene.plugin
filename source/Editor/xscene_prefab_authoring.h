@@ -187,8 +187,8 @@ namespace xscene
             InheritedParent = FirstDetails.m_pPool->getComponent<xecs::component::parent>(FirstDetails.m_PoolIndex).m_Value;
         const auto InheritedFolderId = InheritedParent.isValid() ? xecs::scene::invalid_folder_id_v : FindFolderContaining(Scene, Scene.m_RuntimeToLocal.at(TopLevel.front().m_Value));
 
-        auto& RootArchetype = GameMgr.getOrCreateArchetype<xscene::name, xecs::component::children>();
-        auto  Root          = RootArchetype.CreateEntity([&](xscene::name& Name) noexcept { Name.m_Value = "Prefab Root"; });
+        auto& RootArchetype = GameMgr.getOrCreateArchetype<xecs::component::children>();
+        auto  Root          = RootArchetype.CreateEntity();
 
         if (InheritedParent.isValid())
         {
@@ -288,9 +288,9 @@ namespace xscene
         // loose at scene root after re-registration instead of back in its original folder.
         const auto OriginalFolderId = FindFolderContaining(Scene, RootId);
 
-        std::string Name = "Prefab";
-        if (auto& D = GameMgr.m_ComponentMgr.getEntityDetails(Root); D.m_pPool && D.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xscene::name>.m_BitID))
-            Name = D.m_pPool->getComponent<xscene::name>(D.m_PoolIndex).m_Value;
+        // A multi-select group gets a synthetic root with no name of its own.
+        std::string Name = "Prefab Root";
+        if (auto* pName = FindEntityName(Scene, RootId)) Name = *pName;
 
         const xresource::full_guid NewGuid   = AssetMgr.NewAsset(LibraryGUID, xresource::full_guid{ {}, xecs::prefab::type_guid_v }, ParentGUID, Name);
         const xecs::prefab::guid   PrefabGuid = NewGuid;
@@ -429,8 +429,7 @@ namespace xscene
     xresource::full_guid CreatePrefabVariantFromInstance(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id Id, xecs::component::entity Entity, e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID) noexcept
     {
         std::string Name = "Prefab";
-        if (auto& D = GameMgr.m_ComponentMgr.getEntityDetails(Entity); D.m_pPool && D.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xscene::name>) >= 0)
-            Name = D.m_pPool->getComponent<xscene::name>(D.m_PoolIndex).m_Value;
+        if (auto* pName = FindEntityName(Scene, Id)) Name = *pName;
 
         const xresource::full_guid NewGuid   = AssetMgr.NewAsset(LibraryGUID, xresource::full_guid{ {}, xecs::prefab::type_guid_v }, ParentGUID, Name);
         const xecs::prefab::guid   PrefabGuid = NewGuid;

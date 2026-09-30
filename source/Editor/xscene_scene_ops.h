@@ -3,6 +3,20 @@
 // Scene bookkeeping the scene editing code shares: minting entity and folder ids, folder membership, and releasing a scene.
 namespace xscene
 {
+    // The name the user gave the entity (Level Tree rename), or nullptr when it has none.
+    inline const std::string* FindEntityName(const xecs::scene::instance& Scene, xecs::scene::permanent_id Id) noexcept
+    {
+        auto It = Scene.m_EntityNames.find(Id);
+        return It == Scene.m_EntityNames.end() ? nullptr : &It->second;
+    }
+
+    // What every tree/list shows for an entity: its name, else "Entity #<id>".
+    inline std::string EntityDisplayName(const xecs::scene::instance& Scene, xecs::scene::permanent_id Id) noexcept
+    {
+        if (auto* pName = FindEntityName(Scene, Id); pName) return *pName;
+        return std::format("Entity #{}", Id);
+    }
+
     // GUID-like rather than sequential (was "Max + 1"): a random id means two branches each creating
     // an unrelated new entity independently essentially never end up minting the same permanent_id, so
     // merging their scene folders afterward doesn't collide two different entities onto one file. Only

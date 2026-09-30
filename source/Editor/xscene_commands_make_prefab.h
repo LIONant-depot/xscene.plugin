@@ -56,8 +56,7 @@ namespace xscene::commands
         const auto OriginalFolderId = xscene::FindFolderContaining(Scene, RootId);
 
         std::string Name = "Prefab";
-        if (auto& D = GameMgr.m_ComponentMgr.getEntityDetails(Root); D.m_pPool && D.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xscene::name>.m_BitID))
-            Name = D.m_pPool->getComponent<xscene::name>(D.m_PoolIndex).m_Value;
+        if (auto* pName = xscene::FindEntityName(Scene, RootId)) Name = *pName;
 
         // CreateOrRestoreAsset (E10_Commands_Assets.h), not a plain NewAsset call - a re-Redo
         // (after an Undo trashed this exact prefab asset guid) must restore-from-trash instead of
@@ -322,8 +321,7 @@ namespace xscene::commands
             if (iType < 0) return "MakePrefabVariant: entity is not a prefab instance";
 
             std::string Name = "Prefab";
-            if (Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xscene::name>.m_BitID))
-                Name = Details.m_pPool->getComponent<xscene::name>(Details.m_PoolIndex).m_Value;
+            if (auto* pName = xscene::FindEntityName(*pScene, Id)) Name = *pName;
 
             e10::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentGuid, Name);
             const xecs::prefab::guid PrefabGuid = AssetGuid;

@@ -98,13 +98,7 @@ namespace xscene
             if (It == pScene->m_RuntimeToLocal.end()) continue;
 
             const auto Id = It->second;
-            OutLabel = std::format("Entity #{}", Id);
-            if (auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity); Details.m_pPool)
-            {
-                auto Bits = Details.m_pPool->m_pArchetype->getComponentBits();
-                if (Bits.getBit(xecs::component::type::info_v<xscene::name>.m_BitID))
-                    OutLabel = Details.m_pPool->getComponent<xscene::name>(Details.m_PoolIndex).m_Value;
-            }
+            OutLabel = EntityDisplayName(*pScene, Id);
             std::string SceneLabel;
             e10::RemapGUIDToString(SceneLabel, xresource::full_guid{ SceneGuid.m_Instance, SceneGuid.m_Type });
             OutLabel += std::format(" ({})", SceneLabel);
