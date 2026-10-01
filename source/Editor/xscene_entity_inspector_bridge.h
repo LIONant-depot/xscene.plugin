@@ -80,7 +80,7 @@ namespace xscene
             // E10_TextureResourcePipeline.cpp already established this exact idiom
             // (`Inspectors[0].m_OnGetComponentPointer.m_Delegates.clear();` before its own
             // re-Register) for the same reason - mirrored here for all six delegates this bridge
-            // owns, not just the one E10 happened to need it for.
+            // owns, not just the one xresource_editor happened to need it for.
             Inspector.m_OnChangeEvent.m_Delegates.clear();
             Inspector.m_OnOverrideCheck.m_Delegates.clear();
             Inspector.m_OnOverrideReset.m_Delegates.clear();
@@ -344,7 +344,7 @@ namespace xscene
             // entity-reference field too) - the shared inspector has no default draw style registered
             // for the raw 'entity' atomic type at all, so this is not optional polish, it's what makes
             // entity_reference safe to add to an entity in the first place. Drag a row from the Level
-            // tree (E29_ENTITY_DRAG, the same shared payload reparenting/prefab-creation already use)
+            // tree (LEVEL_ENTITY_DRAG, the same shared payload reparenting/prefab-creation already use)
             // onto this property to assign it; "X" clears it. Shows "<unresolved>" rather than
             // crashing when the target is valid but its owning scene isn't currently open
             // (ResolveEntityReference can't search a scene nobody loaded) - the underlying
@@ -376,7 +376,7 @@ namespace xscene
                 const bool bIsDropTarget = ImGui::BeginDragDropTarget();
                 if (bIsDropTarget)
                 {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("E29_ENTITY_DRAG"))
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("LEVEL_ENTITY_DRAG"))
                     {
                         IM_ASSERT(payload->DataSize == sizeof(xscene::entity_drag_payload_t));
                         auto& Dropped = *reinterpret_cast<const xscene::entity_drag_payload_t*>(payload->Data);

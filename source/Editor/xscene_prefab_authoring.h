@@ -265,7 +265,7 @@ namespace xscene
     // Prefab asset (at LibraryGUID/ParentGUID - the caller's own drop target) and converts the
     // original live group into an instance of it, generalizing the single-entity "drag out becomes an
     // instance" behavior.
-    xresource::full_guid CreatePrefabFromGroupRoot(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root) noexcept
+    xresource::full_guid CreatePrefabFromGroupRoot(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root) noexcept
     {
         // If Root already had a parent in the live scene (e.g. a single child entity that's part of
         // some OTHER, unrelated hierarchy, or a whole existing subtree being grouped), that positional
@@ -399,7 +399,7 @@ namespace xscene
     }
 
     // Payload for dragging a scene entity onto an asset-browser folder to create a Prefab from it -
-    // registered against e10::external_drop_registration_base (see E10_AssetBrowser.h) so the browser
+    // registered against xresource_editor::external_drop_registration_base (see xresource_editor_asset_browser.h) so the browser
     // can accept it without knowing anything about xECS/scenes. Carries the scene guid + the entity's
     // scene-local permanent_id rather than a live xecs::component::entity handle, since the handle
     // itself is only guaranteed valid for the frame it was captured in - re-resolving it through the
@@ -415,7 +415,7 @@ namespace xscene
     // Set by the editor once the command/undo system exists.
     // entity_to_prefab_drop::OnDrop cannot include the MakePrefab command headers (include order /
     // cycle with this file), so the drop path calls through this hook instead of CreatePrefab* directly.
-    using make_prefab_drop_fn_t = xresource::full_guid(*)(e10::library_mgr&, e10::library::guid, xresource::full_guid, const entity_drag_payload_t&) noexcept;
+    using make_prefab_drop_fn_t = xresource::full_guid(*)(xresource_editor::library_mgr&, xresource_editor::library::guid, xresource::full_guid, const entity_drag_payload_t&) noexcept;
     inline make_prefab_drop_fn_t g_MakePrefabDropHandler = nullptr;
 
     // Unity's own "Prefab Variant" fast path: dragging a SINGLE existing prefab instance (no other
@@ -426,7 +426,7 @@ namespace xscene
     // existing identity to preserve in the first place (a brand-new synthetic root is minted either
     // way), and a PLAIN entity (never instanced) has no existing prefab connection to re-point - both
     // of those keep going through the general path unchanged.
-    xresource::full_guid CreatePrefabVariantFromInstance(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id Id, xecs::component::entity Entity, e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID) noexcept
+    xresource::full_guid CreatePrefabVariantFromInstance(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id Id, xecs::component::entity Entity, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID) noexcept
     {
         std::string Name = "Prefab";
         if (auto* pName = FindEntityName(Scene, Id)) Name = *pName;
@@ -460,11 +460,11 @@ namespace xscene
         return NewGuid;
     }
 
-    struct entity_to_prefab_drop final : e10::external_drop_registration_base
+    struct entity_to_prefab_drop final : xresource_editor::external_drop_registration_base
     {
-        entity_to_prefab_drop() noexcept : e10::external_drop_registration_base{ "E29_ENTITY_DRAG" } {}
+        entity_to_prefab_drop() noexcept : xresource_editor::external_drop_registration_base{ "LEVEL_ENTITY_DRAG" } {}
 
-        xresource::full_guid OnDrop(e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID, const void* pData, std::size_t Size) const noexcept override
+        xresource::full_guid OnDrop(xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, const void* pData, std::size_t Size) const noexcept override
         {
             if (Size != sizeof(entity_drag_payload_t) || FindSceneContext() == nullptr) return {};
             if (g_MakePrefabDropHandler == nullptr) return {};

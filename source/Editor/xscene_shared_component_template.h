@@ -9,7 +9,7 @@
 //   - Drop a SharedComponentTemplate onto Add Component to add+intern from serialized values
 // Never creates a persistent link from entity to template. Prefer existing CreateAsset /
 // descriptor::Serialize / DESCRIPTOR_GUID DnD / property snapshot shapes.
-#include "dependencies/xresource_pipeline_v2/source/editor/E10_Commands_Assets.h"
+#include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_commands_assets.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
 
 namespace xscene
@@ -118,10 +118,10 @@ namespace xscene
     //---------------------------------------------------------------------------
     // Load descriptor from an existing SharedComponentTemplate asset.
     //---------------------------------------------------------------------------
-    inline bool LoadSharedComponentTemplateDescriptor(e10::library_mgr& LibMgr, e10::library::guid LibraryGuid, xresource::full_guid AssetGuid, xecs::shared_component_template::descriptor& Out) noexcept
+    inline bool LoadSharedComponentTemplateDescriptor(xresource_editor::library_mgr& LibMgr, xresource_editor::library::guid LibraryGuid, xresource::full_guid AssetGuid, xecs::shared_component_template::descriptor& Out) noexcept
     {
         bool bOk = false;
-        LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](e10::library_db::info_node& Node)
+        LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](xresource_editor::library_db::info_node& Node)
         {
             std::wstring DescPath = Node.m_Path;
             if (const auto Slash = DescPath.find_last_of(L'\\'); Slash != std::wstring::npos)
@@ -140,10 +140,10 @@ namespace xscene
     //---------------------------------------------------------------------------
     // Write descriptor next to info.txt for a just-created asset.
     //---------------------------------------------------------------------------
-    inline bool SaveSharedComponentTemplateDescriptor(e10::library_mgr& LibMgr, e10::library::guid LibraryGuid, xresource::full_guid AssetGuid, const xecs::shared_component_template::descriptor& Desc) noexcept
+    inline bool SaveSharedComponentTemplateDescriptor(xresource_editor::library_mgr& LibMgr, xresource_editor::library::guid LibraryGuid, xresource::full_guid AssetGuid, const xecs::shared_component_template::descriptor& Desc) noexcept
     {
         bool bOk = false;
-        LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](e10::library_db::info_node& Node)
+        LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](xresource_editor::library_db::info_node& Node)
         {
             std::wstring DescPath = Node.m_Path;
             if (const auto Slash = DescPath.find_last_of(L'\\'); Slash != std::wstring::npos)
@@ -170,7 +170,7 @@ namespace xscene
         xecs::scene::guid SceneGuid,
         xecs::scene::permanent_id Id,
         std::uint64_t ComponentTypeGuidValue,
-        e10::library::guid LibraryGuid,
+        xresource_editor::library::guid LibraryGuid,
         xresource::full_guid ParentFolder,
         std::string_view Name) noexcept
     {
@@ -210,8 +210,8 @@ namespace xscene
         else
             AssetName = "SharedComponentTemplate";
 
-        e10::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentFolder, AssetName);
-        if (!SaveSharedComponentTemplateDescriptor(e10::g_LibMgr, LibraryGuid, AssetGuid, Desc))
+        xresource_editor::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentFolder, AssetName);
+        if (!SaveSharedComponentTemplateDescriptor(xresource_editor::g_LibMgr, LibraryGuid, AssetGuid, Desc))
             return {};
 
         return AssetGuid;
@@ -253,7 +253,7 @@ namespace xscene
     //---------------------------------------------------------------------------
     // Payload for dragging a SHARE component header [S] onto a Resource View folder
     // to create a SharedComponentTemplate (export-only snapshot). Same external-drop
-    // registration pattern as entity_to_prefab_drop / E29_ENTITY_DRAG.
+    // registration pattern as entity_to_prefab_drop / LEVEL_ENTITY_DRAG.
     //---------------------------------------------------------------------------
     struct share_template_drag_payload_t
     {
@@ -262,11 +262,11 @@ namespace xscene
         std::uint64_t               m_ComponentTypeGuid = 0;
     };
 
-    struct share_to_template_drop final : e10::external_drop_registration_base
+    struct share_to_template_drop final : xresource_editor::external_drop_registration_base
     {
-        share_to_template_drop() noexcept : e10::external_drop_registration_base{ "XSCENE_SHARE_TEMPLATE_DRAG" } {}
+        share_to_template_drop() noexcept : xresource_editor::external_drop_registration_base{ "XSCENE_SHARE_TEMPLATE_DRAG" } {}
 
-        xresource::full_guid OnDrop(e10::library_mgr& /*AssetMgr*/, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID, const void* pData, std::size_t Size) const noexcept override
+        xresource::full_guid OnDrop(xresource_editor::library_mgr& /*AssetMgr*/, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, const void* pData, std::size_t Size) const noexcept override
         {
             if (Size != sizeof(share_template_drag_payload_t)) return {};
             auto* pEd = FindSceneContext();
@@ -289,9 +289,9 @@ namespace xscene
         bool bHandled = false;
         if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload("DESCRIPTOR_GUID"))
         {
-            if (Payload->DataSize >= sizeof(e10::drag_and_drop_folder_payload_t))
+            if (Payload->DataSize >= sizeof(xresource_editor::drag_and_drop_folder_payload_t))
             {
-                auto& Dropped = *reinterpret_cast<const e10::drag_and_drop_folder_payload_t*>(Payload->Data);
+                auto& Dropped = *reinterpret_cast<const xresource_editor::drag_and_drop_folder_payload_t*>(Payload->Data);
                 if (Dropped.m_Source.m_Type == xecs::shared_component_template::type_guid_v)
                 {
                     auto& State = Ed.m_State;
@@ -299,13 +299,13 @@ namespace xscene
                     {
                         xecs::shared_component_template::descriptor Desc;
                         // Prefer project library; fall back to scanning open libraries.
-                        e10::library::guid Lib = e10::g_LibMgr.m_ProjectGUID;
-                        bool bLoaded = LoadSharedComponentTemplateDescriptor(e10::g_LibMgr, Lib, Dropped.m_Source, Desc);
+                        xresource_editor::library::guid Lib = xresource_editor::g_LibMgr.m_ProjectGUID;
+                        bool bLoaded = LoadSharedComponentTemplateDescriptor(xresource_editor::g_LibMgr, Lib, Dropped.m_Source, Desc);
                         if (!bLoaded)
                         {
-                            for (auto& L : e10::g_LibMgr.m_mLibraryDB)
+                            for (auto& L : xresource_editor::g_LibMgr.m_mLibraryDB)
                             {
-                                if (LoadSharedComponentTemplateDescriptor(e10::g_LibMgr, L.first, Dropped.m_Source, Desc))
+                                if (LoadSharedComponentTemplateDescriptor(xresource_editor::g_LibMgr, L.first, Dropped.m_Source, Desc))
                                 {
                                     Lib = L.first;
                                     bLoaded = true;

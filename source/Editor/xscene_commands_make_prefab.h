@@ -6,7 +6,7 @@
 // session (the command/undo known-gaps list) and the Asset Browser command-layer session
 // (the asset browser command layer notes): "Make Prefab" creates a real Prefab ASSET on disk
 // (AssetMgr.NewAsset) AND converts a live entity/group into an instance of it - a genuine composition
-// of what CreateAsset (E10_Commands_Assets.h) and the entity-subtree snapshot/restore machinery
+// of what CreateAsset (xresource_editor_commands_assets.h) and the entity-subtree snapshot/restore machinery
 // (SnapshotSubtreeForRestore/RestoreSubtreeFromSnapshot, xscene_commands_entity_lifecycle.h) each already
 // solve on their own. This file is that composition, not a third reimplementation.
 //
@@ -30,7 +30,7 @@
 // (a single existing entity, root of a real subtree already, or from that synthesis step run
 // separately/manually) exactly as DetermineGroupRoot itself already hands back today. Making THAT
 // step undo-routed too is a distinct, smaller follow-up, not folded in here.
-#include "dependencies/xresource_pipeline_v2/source/editor/E10_Commands_Assets.h"
+#include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_commands_assets.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_entity_lifecycle.h"
 
 namespace xscene::commands
@@ -43,7 +43,7 @@ namespace xscene::commands
     // on every call, leaking an abandoned, never-cleaned-up asset in the Trash on every Redo after an
     // Undo). Body is otherwise a verbatim copy - see that function's own comments for the full
     // reasoning behind each step, not repeated here.
-    inline xresource::full_guid CreatePrefabFromGroupRootWithAssetGuid(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root, xresource::full_guid ExplicitPrefabAssetGuid) noexcept
+    inline xresource::full_guid CreatePrefabFromGroupRootWithAssetGuid(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root, xresource::full_guid ExplicitPrefabAssetGuid) noexcept
     {
         xecs::component::entity OriginalParent;
         if (auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Root); RD.m_pPool && RD.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
@@ -58,11 +58,11 @@ namespace xscene::commands
         std::string Name = "Prefab";
         if (auto* pName = xscene::FindEntityName(Scene, RootId)) Name = *pName;
 
-        // CreateOrRestoreAsset (E10_Commands_Assets.h), not a plain NewAsset call - a re-Redo
+        // CreateOrRestoreAsset (xresource_editor_commands_assets.h), not a plain NewAsset call - a re-Redo
         // (after an Undo trashed this exact prefab asset guid) must restore-from-trash instead of
         // calling NewAsset again, same reasoning/bug CreateAsset's own Redo already had to solve -
         // confirmed live this hits the identical failure mode when reused verbatim here.
-        e10::commands::CreateOrRestoreAsset(LibraryGUID, ExplicitPrefabAssetGuid, ParentGUID, Name);
+        xresource_editor::commands::CreateOrRestoreAsset(LibraryGUID, ExplicitPrefabAssetGuid, ParentGUID, Name);
         const xecs::prefab::guid PrefabGuid = ExplicitPrefabAssetGuid;
 
         GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Root, PrefabGuid);
@@ -147,21 +147,21 @@ namespace xscene::commands
     // here, so a silent miss (bad guid/library) left the Prefab visible in Resources forever after
     // Ctrl+Z. Persist the trashed info.txt immediately so the hide sticks across any reload, and
     // surface failures through xeditor::NotifyError.
-    inline void TrashCreatedPrefabAsset(e10::library::guid LibraryGuid, xresource::full_guid AssetGuid) noexcept
+    inline void TrashCreatedPrefabAsset(xresource_editor::library::guid LibraryGuid, xresource::full_guid AssetGuid) noexcept
     {
         if (AssetGuid.empty())
         {
             xeditor::NotifyError("MakePrefab Undo: refusing to trash an empty asset guid");
             return;
         }
-        if (auto Err = e10::g_LibMgr.MoveToTrash(LibraryGuid, AssetGuid); !Err.empty())
+        if (auto Err = xresource_editor::g_LibMgr.MoveToTrash(LibraryGuid, AssetGuid); !Err.empty())
         {
             xeditor::NotifyError(std::format("MakePrefab Undo: MoveToTrash failed: {}", Err));
             return;
         }
 
         xproperty::settings::context Context;
-        const bool bFound = e10::g_LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](e10::library_db::info_node& Node)
+        const bool bFound = xresource_editor::g_LibMgr.getNodeInfo(LibraryGuid, AssetGuid, [&](xresource_editor::library_db::info_node& Node)
         {
             if (Node.m_Path.empty()) return;
             if (auto SerErr = Node.m_Info.Serialize(false, Node.m_Path.c_str(), Context); SerErr)
@@ -211,15 +211,15 @@ namespace xscene::commands
 
             const auto SceneGuid   = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id          = ParseEntityId(std::get<std::string>(IdArg));
-            const auto LibraryGuid = e10::commands::ParseLibraryGuid(std::get<std::string>(LibraryArg));
-            const auto AssetGuid   = e10::commands::ParseAssetGuid(std::get<std::string>(AssetArg));
-            const auto ParentGuid  = e10::commands::ParseAssetGuid(std::get<std::string>(ParentArg));
+            const auto LibraryGuid = xresource_editor::commands::ParseLibraryGuid(std::get<std::string>(LibraryArg));
+            const auto AssetGuid   = xresource_editor::commands::ParseAssetGuid(std::get<std::string>(AssetArg));
+            const auto ParentGuid  = xresource_editor::commands::ParseAssetGuid(std::get<std::string>(ParentArg));
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "MakePrefab: target not found";
 
             const auto Root = pScene->m_LocalToRuntime.at(Id);
-            const auto Result = CreatePrefabFromGroupRootWithAssetGuid(World(), *pScene, SceneGuid, &State(), e10::g_LibMgr, LibraryGuid, ParentGuid, Root, AssetGuid);
+            const auto Result = CreatePrefabFromGroupRootWithAssetGuid(World(), *pScene, SceneGuid, &State(), xresource_editor::g_LibMgr, LibraryGuid, ParentGuid, Root, AssetGuid);
             if (Result.empty()) return "MakePrefab: failed";
             return {};
         }
@@ -265,8 +265,8 @@ namespace xscene::commands
             // asset system has). Persist the trash tag to info.txt immediately - see
             // TrashCreatedPrefabAsset's own comment (silent MoveToTrash misses left "Entity" Prefabs
             // visible in Resources after Ctrl+Z).
-            const auto LibraryGuid = e10::commands::ParseLibraryGuid(std::format("{:016X}", Library));
-            TrashCreatedPrefabAsset(LibraryGuid, e10::commands::ParseAssetGuid(Asset));
+            const auto LibraryGuid = xresource_editor::commands::ParseLibraryGuid(std::format("{:016X}", Library));
+            TrashCreatedPrefabAsset(LibraryGuid, xresource_editor::commands::ParseAssetGuid(Asset));
         }
 
         xcmdline::parser::handle m_hScene, m_hId, m_hLibrary, m_hAsset, m_hParent;
@@ -308,9 +308,9 @@ namespace xscene::commands
 
             const auto SceneGuid   = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id          = ParseEntityId(std::get<std::string>(IdArg));
-            const auto LibraryGuid = e10::commands::ParseLibraryGuid(std::get<std::string>(LibraryArg));
-            const auto AssetGuid   = e10::commands::ParseAssetGuid(std::get<std::string>(AssetArg));
-            const auto ParentGuid  = e10::commands::ParseAssetGuid(std::get<std::string>(ParentArg));
+            const auto LibraryGuid = xresource_editor::commands::ParseLibraryGuid(std::get<std::string>(LibraryArg));
+            const auto AssetGuid   = xresource_editor::commands::ParseAssetGuid(std::get<std::string>(AssetArg));
+            const auto ParentGuid  = xresource_editor::commands::ParseAssetGuid(std::get<std::string>(ParentArg));
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "MakePrefabVariant: target not found";
@@ -323,7 +323,7 @@ namespace xscene::commands
             std::string Name = "Prefab";
             if (auto* pName = xscene::FindEntityName(*pScene, Id)) Name = *pName;
 
-            e10::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentGuid, Name);
+            xresource_editor::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentGuid, Name);
             const xecs::prefab::guid PrefabGuid = AssetGuid;
 
             World().m_PrefabMgr.CreatePrefabFromEntity(Entity, PrefabGuid);
@@ -456,10 +456,10 @@ namespace xscene::commands
             }
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
-            const auto LibraryGuid = e10::commands::ParseLibraryGuid(std::format("{:016X}", Library));
+            const auto LibraryGuid = xresource_editor::commands::ParseLibraryGuid(std::format("{:016X}", Library));
 
             // Trash the created asset first (same asymmetric-Undo shape as CreateAsset/MakePrefab).
-            TrashCreatedPrefabAsset(LibraryGuid, e10::commands::ParseAssetGuid(Asset));
+            TrashCreatedPrefabAsset(LibraryGuid, xresource_editor::commands::ParseAssetGuid(Asset));
 
             if (!bHadPI) return;
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
@@ -488,7 +488,7 @@ namespace xscene::commands
 namespace xscene
 {
 
-    inline xresource::full_guid MakePrefabDropViaCommands(e10::library_mgr& AssetMgr, e10::library::guid LibraryGUID, xresource::full_guid ParentGUID, const entity_drag_payload_t& Payload) noexcept
+    inline xresource::full_guid MakePrefabDropViaCommands(xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, const entity_drag_payload_t& Payload) noexcept
     {
         (void)AssetMgr;
         auto* pEd = FindSceneContext();
@@ -517,9 +517,9 @@ namespace xscene
                 const auto Cmd = std::format("MakePrefabVariant -Scene {} -Id {} -Library {} -Asset {} -Parent {}"
                     , xscene::commands::FormatSceneGuid(Payload.m_SceneGuid)
                     , xscene::commands::FormatEntityId(Payload.m_Id)
-                    , e10::commands::FormatLibraryGuid(LibraryGUID)
-                    , e10::commands::FormatAssetGuid(NewAsset)
-                    , e10::commands::FormatAssetGuid(ParentGUID));
+                    , xresource_editor::commands::FormatLibraryGuid(LibraryGUID)
+                    , xresource_editor::commands::FormatAssetGuid(NewAsset)
+                    , xresource_editor::commands::FormatAssetGuid(ParentGUID));
                 if (!xeditor::RunGroup(*pDocUndo, "MakePrefabVariant", { Cmd })) return {};
                 return NewAsset;
             }
@@ -535,9 +535,9 @@ namespace xscene
         const auto Cmd = std::format("MakePrefab -Scene {} -Id {} -Library {} -Asset {} -Parent {}"
             , xscene::commands::FormatSceneGuid(Payload.m_SceneGuid)
             , xscene::commands::FormatEntityId(RootIdIt->second)
-            , e10::commands::FormatLibraryGuid(LibraryGUID)
-            , e10::commands::FormatAssetGuid(NewAsset)
-            , e10::commands::FormatAssetGuid(ParentGUID));
+            , xresource_editor::commands::FormatLibraryGuid(LibraryGUID)
+            , xresource_editor::commands::FormatAssetGuid(NewAsset)
+            , xresource_editor::commands::FormatAssetGuid(ParentGUID));
         if (!xeditor::RunGroup(*pDocUndo, "MakePrefab", { Cmd })) return {};
         return NewAsset;
     }

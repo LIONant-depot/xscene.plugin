@@ -100,7 +100,7 @@ namespace xscene
             const auto Id = It->second;
             OutLabel = EntityDisplayName(*pScene, Id);
             std::string SceneLabel;
-            e10::RemapGUIDToString(SceneLabel, xresource::full_guid{ SceneGuid.m_Instance, SceneGuid.m_Type });
+            xresource_editor::RemapGUIDToString(SceneLabel, xresource::full_guid{ SceneGuid.m_Instance, SceneGuid.m_Type });
             OutLabel += std::format(" ({})", SceneLabel);
             OutSceneGuid = SceneGuid;
             return true;
