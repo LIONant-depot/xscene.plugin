@@ -283,12 +283,28 @@ namespace xscene
                 // hover feedback itself still reads as a real button, just not a boxed one at rest.
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                // Kind labels in the theme's disabled grey, before the buttons: "Builder" (consumed when the entity is created in
+                // the game, see doc/xecs_builder_components.md) first, then "Shared". Both: "Builder Shared".
+                const bool bIsBuilder = pInfo->m_bBuilder;
+                const char* pKind = (bIsBuilder && bIsShare) ? "Builder Shared" : bIsBuilder ? "Builder" : bIsShare ? "Shared" : nullptr;
+                const char* pKindTip = bIsBuilder
+                    ? "Builder component: it only configures the entity while it is created in the game (a builder system consumes it), it is not part of the running entity."
+                    : nullptr;
+                if (bIsBuilder && !bIsShare)
+                {
+                    // Left-aligned at the start of the value column, exactly where "Builder Shared" / "Shared" start.
+                    ImGui::SetCursorScreenPos(RowPos);
+                    ImGui::TextDisabled("%s", pKind);
+                    if (pKindTip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", pKindTip);
+                    ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
+                }
                 if (bIsShare)
                 {
                     // TextDisabled is the Level Editor theme's darker grey (#7A7A7A),
                     // keeping the SHARE marker distinct without changing the DnD button.
                     ImGui::SetCursorScreenPos(RowPos);
-                    ImGui::TextDisabled("Shared Component");
+                    ImGui::TextDisabled("%s", pKind);
+                    if (pKindTip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", pKindTip);
                     ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - RightEdgePad - ShareButtonsWidth, RowPos.y));
                     ImGui::SmallButton("S");
                     if (ImGui::IsItemHovered())
