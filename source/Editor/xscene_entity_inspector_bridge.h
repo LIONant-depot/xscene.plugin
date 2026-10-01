@@ -33,6 +33,9 @@ namespace xscene
         // back into the instance) fires m_OnChangeEvent itself once committed - without the guard, a
         // revert would immediately re-record the very override it just removed.
         std::unordered_map<void*, const xecs::component::type::info*> m_ComponentMap;
+
+        // What the Inspector is given for a SHARE component instead of the shared instance itself (see m_OnGetComponentPointer).
+        std::unordered_map<const xecs::component::type::info*, std::vector<std::byte>> m_ShareScratch;
         bool                                                           m_bSuppressOverrideTracking = false;
 
         // Set by the component-header callback when its "[X]" is clicked - processed once, right
@@ -484,6 +487,19 @@ namespace xscene
                 auto* pData = static_cast<std::byte*>(xscene::ResolveComponentPointer(GameMgr, State.m_SelectedEntity, *pInfo));
                 if (pData == nullptr) return;
                 pObject = pData;
+
+                // A SHARE value is one instance used by every entity that has that value: the Inspector writes the value of an edited row into
+                // the object it was given, before the SetProperty command runs, and that would change the instance of all of them (and the
+                // command, which then moves the entity to the family of the new value, would find the old family holding the new value too).
+                // So the Inspector gets a copy, refreshed every frame, and the command stays the only thing that changes share data.
+                if (pInfo->m_TypeID == xecs::component::type::id::SHARE)
+                {
+                    auto& Scratch = m_ShareScratch[pInfo];
+                    Scratch.resize(pInfo->m_Size);
+                    std::memcpy(Scratch.data(), pData, pInfo->m_Size);
+                    pData = Scratch.data();
+                    pObject = pData;
+                }
 
                 // Keyed by the freshly-resolved real pointer, matching what m_OnOverrideCheck/
                 // m_OnPropertyChanged/m_OnComponentHeaderRender actually receive from xproperty this

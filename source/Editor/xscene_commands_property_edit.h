@@ -34,11 +34,13 @@ namespace xscene::commands
         xecs::component::entity            m_Entity{};
         const xecs::component::type::info* m_pInfo = nullptr;
         void*                              m_pInstance = nullptr;
+        scene_context*                     m_pEd = nullptr;     // the editor this was resolved in: a SHARE edit moves the entity, so it needs the world
     };
 
     inline resolved_property_target ResolvePropertyTarget(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::uint64_t ComponentGuidValue) noexcept
     {
         resolved_property_target Out;
+        Out.m_pEd = &Ed;
 
         auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);
         if (!pScene) return Out;
@@ -125,7 +127,7 @@ namespace xscene::commands
         // Copy-on-write re-intern via getOrCreatePoolFamilyFromSameArchetype + MoveIn.
         if (Target.m_pInfo->m_TypeID == xecs::component::type::id::SHARE)
         {
-            auto* pCtx = xscene::FindSceneContext();
+            auto* pCtx = Target.m_pEd;                                  // (not a global lookup: that one finds nothing when the edit comes from a command line)
             if (!pCtx) return;
 
             std::vector<std::byte> Temp(Target.m_pInfo->m_Size);
