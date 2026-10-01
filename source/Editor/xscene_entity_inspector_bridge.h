@@ -1,5 +1,6 @@
 #pragma once
 #include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
+#include "dependencies/xeditor/include/xeditor/hint.h"
 
 // entity_inspector_bridge: inspector callbacks -> prefab-override and entity-reference commands.
 // Split out of xscene_entity_inspector_bridge.h; included from there at the position this code used to occupy.
@@ -295,7 +296,7 @@ namespace xscene
                     // Left-aligned at the start of the value column, exactly where "Builder Shared" / "Shared" start.
                     ImGui::SetCursorScreenPos(RowPos);
                     ImGui::TextDisabled("%s", pKind);
-                    if (pKindTip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", pKindTip);
+                    if (pKindTip && ImGui::IsItemHovered()) xeditor::hint::Text("%s", pKindTip);
                     ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
                 }
                 if (bIsShare)
@@ -304,11 +305,11 @@ namespace xscene
                     // keeping the SHARE marker distinct without changing the DnD button.
                     ImGui::SetCursorScreenPos(RowPos);
                     ImGui::TextDisabled("%s", pKind);
-                    if (pKindTip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", pKindTip);
+                    if (pKindTip && ImGui::IsItemHovered()) xeditor::hint::Text("%s", pKindTip);
                     ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - RightEdgePad - ShareButtonsWidth, RowPos.y));
                     ImGui::SmallButton("S");
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Drag onto a Resource folder to save as Shared-Component Template");
+                        xeditor::hint::Text("Drag onto a Resource folder to save as Shared-Component Template");
                     // Gated BeginDragDropSource (same 12px pattern as asset browser / source control) so a
                     // plain click does not swallow the item; only a real drag starts the export payload.
                     if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 12.0f)
@@ -333,7 +334,7 @@ namespace xscene
                     // Which systems stop/start running on this entity if it's removed.
                     auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Ed.m_State.m_SelectedEntity);
                     if (Details.m_pPool)
-                        ImGui::SetTooltip("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(Ed.World()), Details.m_pPool->m_pArchetype->getComponentBits(), *pInfo, false).c_str());
+                        xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(Ed.World()), Details.m_pPool->m_pArchetype->getComponentBits(), *pInfo, false).c_str());
                 }
             };
             Inspector.m_OnComponentHeaderRender.Register(m_OnComponentHeaderRender);

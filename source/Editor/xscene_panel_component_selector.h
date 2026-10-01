@@ -12,6 +12,7 @@
 // Not designed to be included standalone. Not a docked editor window â€” Entity
 // Properties opens this as an ImGui popup that replaces the old BeginCombo list.
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
+#include "dependencies/xeditor/include/xeditor/hint.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
 #include "dependencies/xeditor/include/xeditor/widgets.h"
@@ -156,7 +157,7 @@ namespace xscene
                 ImGui::PushID(Comp.m_pInfo->m_pName);
                 const bool bClicked = ImGui::Selectable(Comp.m_pInfo->m_pName);
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true).c_str());
+                    xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true).c_str());
 
                 // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
                 if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *Comp.m_pInfo, true); !Change.empty())

@@ -11,6 +11,7 @@
 // xscene_commands_property_edit.h/xscene_command_context.h/xundo_system.h itself) included directly here -
 // same self-sufficiency reasoning as the Level tree panel's own top comment for why.
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_component_edit.h"
+#include "dependencies/xeditor/include/xeditor/hint.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_apply_overrides.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
@@ -53,7 +54,7 @@ namespace xscene
             bAny = true;
             ImGui::TextUnformatted(su::SystemName(S));
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", S.m_bUpdate ? std::format("Update system, runs #{} in the frame", S.m_Order).c_str() : "Notifier system (runs on entity create/destroy/move events)");
+                xeditor::hint::Text("%s", S.m_bUpdate ? std::format("Update system, runs #{} in the frame", S.m_Order).c_str() : "Notifier system (runs on entity create/destroy/move events)");
             if (!S.m_bEnabled) { ImGui::SameLine(); ImGui::TextColored(WarnColor, "(disabled in System Registry)"); }
             ImGui::Indent();
             AccessLine(S, su::access::WRITE, WriteColor);
@@ -93,7 +94,7 @@ namespace xscene
         if (ImGui::Button("Copy as text"))
             ImGui::SetClipboardText(su::DescribeEntitySystems(GameMgr, Bits, Components).c_str());
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Same report as the DescribeEntity command - paste it into a bug report or an AI chat.");
+            xeditor::hint::Text("Same report as the DescribeEntity command - paste it into a bug report or an AI chat.");
     }
 
     //---------------------------------------------------------------------------
@@ -184,7 +185,7 @@ namespace xscene
                     if (ImGui::Button(std::format("Systems ({})###EntitySystems", Running.size()).c_str()))
                         ImGui::OpenPopup(kSystemsPopupId);
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Running on this entity: %s\nClick for what each one reads/writes, what isn't running and why,\nand what adding/removing a component would change.",
+                        xeditor::hint::Text("Running on this entity: %s\nClick for what each one reads/writes, what isn't running and why,\nand what adding/removing a component would change.",
                                           Running.empty() ? "none" : xscene::system_usage::JoinNames(Running).c_str());
 
                     ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
@@ -217,7 +218,7 @@ namespace xscene
                             // Tooltip (only show when hovering) â€” same format as Play transport buttons
                             if (ImGui::IsItemHovered())
                             {
-                                ImGui::BeginTooltip();
+                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
                                 ImGui::Text("Apply");
                                 ImGui::TextDisabled("Push all overrides on this prefab instance into the Prefab asset");
                                 ImGui::EndTooltip();
@@ -232,7 +233,7 @@ namespace xscene
                             }
                             if (ImGui::IsItemHovered())
                             {
-                                ImGui::BeginTooltip();
+                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
                                 ImGui::Text("Revert Hierarchy");
                                 ImGui::TextDisabled("Restore removed children / drop added children; leave property overrides");
                                 ImGui::EndTooltip();
@@ -249,7 +250,7 @@ namespace xscene
                             }
                             if (ImGui::IsItemHovered())
                             {
-                                ImGui::BeginTooltip();
+                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
                                 ImGui::Text("Revert All");
                                 ImGui::TextDisabled("Re-sync from Prefab (keeps root Transform); clears all overrides");
                                 ImGui::EndTooltip();
@@ -417,7 +418,7 @@ namespace xscene
                         if (ImGui::IsItemHovered())
                         {
                             const auto Used = xscene::system_usage::UsedBy(xscene::system_usage::AllSystems(GameMgr), pInfo->m_Guid.m_Value);
-                            ImGui::SetTooltip("%s (tag component - no properties)\n%s", pLabel, Used.empty() ? "Not used by any system." : ("Used by: " + Used).c_str());
+                            xeditor::hint::Text("%s (tag component - no properties)\n%s", pLabel, Used.empty() ? "Not used by any system." : ("Used by: " + Used).c_str());
                         }
                         pDrawList->AddText(ImVec2(Min.x + FramePad.x, Min.y + FramePad.y), ImGui::GetColorU32(ImGuiCol_Text), pLabel);
 
@@ -432,7 +433,7 @@ namespace xscene
                         if (ImGui::IsItemHovered())
                         {
                             pDrawList->AddRectFilled(XMin, Max, ImGui::GetColorU32(ImVec4(0x55 / 255.0f, 0x55 / 255.0f, 0x75 / 255.0f, 1.0f)), Rounding, ImDrawFlags_RoundCornersRight);
-                            ImGui::SetTooltip("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(GameMgr), pArchetype->getComponentBits(), *pInfo, false).c_str());
+                            xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(GameMgr), pArchetype->getComponentBits(), *pInfo, false).c_str());
                         }
                         const ImVec2 XTextSize = ImGui::CalcTextSize("x");
                         pDrawList->AddText(ImVec2(XMin.x + (XWidth - XTextSize.x) * 0.5f, Min.y + FramePad.y), ImGui::GetColorU32(ImGuiCol_Text), "x");
