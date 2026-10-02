@@ -129,7 +129,7 @@ namespace xscene
             xproperty::settings::context Context;
             if (auto Err = Out.Serialize(true, DescPath, Context); Err)
             {
-                xeditor::NotifyError(std::format("SharedComponentTemplate load failed: {}", Err.getMessage()));
+                xeditor::NotifyToast(std::format("SharedComponentTemplate load failed: {}", Err.getMessage()));
                 return;
             }
             bOk = true;
@@ -153,7 +153,7 @@ namespace xscene
             auto& Mutable = const_cast<xecs::shared_component_template::descriptor&>(Desc);
             if (auto Err = Mutable.Serialize(false, DescPath, Context); Err)
             {
-                xeditor::NotifyError(std::format("SharedComponentTemplate save failed: {}", Err.getMessage()));
+                xeditor::NotifyToast(std::format("SharedComponentTemplate save failed: {}", Err.getMessage()));
                 return;
             }
             Node.m_bHasDescriptor = true;
@@ -177,21 +177,21 @@ namespace xscene
         auto* pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ ComponentTypeGuidValue });
         if (!pInfo || pInfo->m_TypeID != xecs::component::type::id::SHARE)
         {
-            xeditor::NotifyError("Save as Shared-Component Template: component is not a share type");
+            xeditor::NotifyToast("Save as Shared-Component Template: component is not a share type");
             return {};
         }
 
         auto Entity = xscene::commands::ResolveEntityHandle(Ed, SceneGuid, Id);
         if (Entity.isValid() == false)
         {
-            xeditor::NotifyError("Save as Shared-Component Template: entity not found");
+            xeditor::NotifyToast("Save as Shared-Component Template: entity not found");
             return {};
         }
 
         void* pInstance = ResolveComponentPointer(Ed.World(), Entity, *pInfo);
         if (pInstance == nullptr)
         {
-            xeditor::NotifyError("Save as Shared-Component Template: share value not found on entity");
+            xeditor::NotifyToast("Save as Shared-Component Template: share value not found on entity");
             return {};
         }
 
@@ -229,7 +229,7 @@ namespace xscene
         auto* pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Desc.m_ComponentTypeGuid });
         if (!pInfo || pInfo->m_TypeID != xecs::component::type::id::SHARE)
         {
-            xeditor::NotifyError("SharedComponentTemplate: unknown or non-share component type");
+            xeditor::NotifyToast("SharedComponentTemplate: unknown or non-share component type");
             return false;
         }
 

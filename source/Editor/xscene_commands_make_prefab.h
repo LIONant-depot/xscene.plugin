@@ -68,7 +68,7 @@ namespace xscene::commands
         GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Root, PrefabGuid);
         if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
         {
-            xeditor::NotifyError(std::format("Failed to save new Prefab: {}", Err.getMessage()));
+            xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
         }
 
@@ -151,12 +151,12 @@ namespace xscene::commands
     {
         if (AssetGuid.empty())
         {
-            xeditor::NotifyError("MakePrefab Undo: refusing to trash an empty asset guid");
+            xeditor::NotifyToast("MakePrefab Undo: refusing to trash an empty asset guid");
             return;
         }
         if (auto Err = xresource_editor::g_LibMgr.MoveToTrash(LibraryGuid, AssetGuid); !Err.empty())
         {
-            xeditor::NotifyError(std::format("MakePrefab Undo: MoveToTrash failed: {}", Err));
+            xeditor::NotifyToast(std::format("MakePrefab Undo: MoveToTrash failed: {}", Err));
             return;
         }
 
@@ -166,13 +166,13 @@ namespace xscene::commands
             if (Node.m_Path.empty()) return;
             if (auto SerErr = Node.m_Info.Serialize(false, Node.m_Path.c_str(), Context); SerErr)
             {
-                xeditor::NotifyError(std::format("MakePrefab Undo: failed to persist trashed info.txt: {}", SerErr.getMessage()));
+                xeditor::NotifyToast(std::format("MakePrefab Undo: failed to persist trashed info.txt: {}", SerErr.getMessage()));
                 return;
             }
             Node.m_InfoChangeCount = 0;
         });
         if (!bFound)
-            xeditor::NotifyError("MakePrefab Undo: MoveToTrash succeeded but getNodeInfo missed the asset");
+            xeditor::NotifyToast("MakePrefab Undo: MoveToTrash succeeded but getNodeInfo missed the asset");
     }
 
     //================================================================================================

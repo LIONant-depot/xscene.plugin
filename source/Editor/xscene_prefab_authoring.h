@@ -48,7 +48,7 @@ namespace xscene
     {
         if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(PrefabGuid); Err)
         {
-            xeditor::NotifyError(std::format("Failed to load Prefab: {}", Err.getMessage()));
+            xeditor::NotifyToast(std::format("Failed to load Prefab: {}", Err.getMessage()));
             return;
         }
 
@@ -301,7 +301,7 @@ namespace xscene
         GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Root, PrefabGuid);
         if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
         {
-            xeditor::NotifyError(std::format("Failed to save new Prefab: {}", Err.getMessage()));
+            xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
         }
 
@@ -440,7 +440,7 @@ namespace xscene
         GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Entity, PrefabGuid);
         if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
         {
-            xeditor::NotifyError(std::format("Failed to save new Prefab: {}", Err.getMessage()));
+            xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
         }
 

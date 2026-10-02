@@ -187,7 +187,7 @@ namespace xscene
 
                 if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(Ctx.m_pPI->m_PrefabInstance); Err)
                 {
-                    xeditor::NotifyError(std::format("Failed to load source prefab for revert: {}", Err.getMessage()));
+                    xeditor::NotifyToast(std::format("Failed to load source prefab for revert: {}", Err.getMessage()));
                     return;
                 }
 
@@ -401,7 +401,7 @@ namespace xscene
                                         const bool bAlreadyDependency = std::find(pOwningScene->m_ParentScenes.begin(), pOwningScene->m_ParentScenes.end(), Dropped.m_SceneGuid) != pOwningScene->m_ParentScenes.end();
                                         if (!bAlreadyDependency && xscene::WouldCreateDependencyCycle(GameMgr, State.m_SelectedEntityScene, Dropped.m_SceneGuid))
                                         {
-                                            xeditor::NotifyError("Can't assign that reference: its scene already depends on this one (would create a circular scene dependency)");
+                                            xeditor::NotifyToast("Can't assign that reference: its scene already depends on this one (would create a circular scene dependency)");
                                             bRefused = true;
                                         }
                                         else if (!bAlreadyDependency)
@@ -410,7 +410,7 @@ namespace xscene
                                             // drag the target scene into this scene's Dependencies folder
                                             // first. Auto-adding ParentScenes from entity refs is what made
                                             // the graph unstable / hard to reason about.
-                                            xeditor::NotifyError("Can't assign that reference: add the target scene under Dependencies first");
+                                            xeditor::NotifyToast("Can't assign that reference: add the target scene under Dependencies first");
                                             bRefused = true;
                                         }
                                     }

@@ -316,7 +316,7 @@ namespace xscene::commands
             PI.m_lComponents    = std::move(TempPI.m_lComponents);
             PI.m_HierarchyDiffs = std::move(TempPI.m_HierarchyDiffs);
             if (auto Err = World().m_PrefabMgr.Save(PI.m_PrefabInstance); Err)
-                xeditor::NotifyError(std::format("ApplyOverrides Undo: Prefab Save failed: {}", Err.getMessage()));
+                xeditor::NotifyToast(std::format("ApplyOverrides Undo: Prefab Save failed: {}", Err.getMessage()));
 
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, static_cast<xecs::scene::permanent_id>(Id));
             State().m_bEntityInspectorDirty = true;

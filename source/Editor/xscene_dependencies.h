@@ -258,7 +258,7 @@ namespace xscene
 
         if (auto Err = GameMgr.m_SceneMgr.RequestLoad(Guid); Err)
         {
-            xeditor::NotifyError(std::format("Failed to load Scene: {}", Err.getMessage()));
+            xeditor::NotifyToast(std::format("Failed to load Scene: {}", Err.getMessage()));
             return;
         }
         State.m_OpenScenes.push_back(Guid);
