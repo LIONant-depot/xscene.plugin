@@ -80,14 +80,14 @@ namespace xscene::commands
         set_entity_reference_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SetEntityReference", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Assigns or clears an entity-reference property (undoable, restores the previous target AND the prefab-override bookkeeping on Undo). Usage: SetEntityReference -Scene hexguid -Id hexid -Component hex64 -Path base64 -AfterScene hexguid -AfterId hexid (AfterId 00000000 = clear)";
+            return "Assigns or clears an entity-reference property (undoable, restores the previous target AND the prefab-override bookkeeping on Undo). Usage: SetEntityReference -Scene hexguid -Id hexid -Component hex64 -Path text -AfterScene hexguid -AfterId hexid (AfterId 00000000 = clear)";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene      = m_Parser.addOption("Scene",      "Scene guid of the entity holding the reference, 16 hex digits",  true, 1);
             m_hId         = m_Parser.addOption("Id",         "Entity permanent_id holding the reference, 8 hex digits",       true, 1);
             m_hComponent  = m_Parser.addOption("Component",  "Component type guid, 16 hex digits",                            true, 1);
-            m_hPath       = m_Parser.addOption("Path",       "Property path, Base64-encoded",                                 true, 1);
+            m_hPath       = m_Parser.addOption("Path",       "Property path",                                 true, 1);
             m_hAfterScene = m_Parser.addOption("AfterScene", "Target entity's scene guid, 16 hex digits (0 = clear)",         true, 1);
             m_hAfterId    = m_Parser.addOption("AfterId",    "Target entity's permanent_id, 8 hex digits (0 = clear)",        true, 1);
         }
@@ -107,7 +107,7 @@ namespace xscene::commands
             const auto SceneGuid  = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id         = ParseEntityId(std::get<std::string>(IdArg));
             const auto CompGuid   = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
-            const auto Path       = xeditor::Base64Decode(std::get<std::string>(PathArg));
+            const auto Path       = std::get<std::string>(PathArg);
             const auto AfterScene = ParseSceneGuid(std::get<std::string>(AfterSceneArg));
             const auto AfterId    = ParseEntityId(std::get<std::string>(AfterIdArg));
 
@@ -142,7 +142,7 @@ namespace xscene::commands
             const std::uint64_t Scene     = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
             const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
-            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(PathArg));
+            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
 

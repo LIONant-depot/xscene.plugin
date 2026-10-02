@@ -32,14 +32,14 @@ namespace xscene::commands
         create_folder_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "CreateFolder", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Creates a new, empty folder (undoable - deletes it again on Undo). Usage: CreateFolder -Scene hexguid -Id hexfolder -Parent hexfolder (0 = root) -Name base64";
+            return "Creates a new, empty folder (undoable - deletes it again on Undo). Usage: CreateFolder -Scene hexguid -Id hexfolder -Parent hexfolder (0 = root) -Name text";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",                        true, 1);
             m_hId     = m_Parser.addOption("Id",     "Folder id, 8 hex digits, pre-minted by the caller", true, 1);
             m_hParent = m_Parser.addOption("Parent", "Parent folder id, 8 hex digits (0 = root)",         true, 1);
-            m_hName   = m_Parser.addOption("Name",   "Folder name, Base64-encoded",                       true, 1);
+            m_hName   = m_Parser.addOption("Name",   "Folder name",                       true, 1);
         }
 
         std::string Redo() noexcept override
@@ -54,7 +54,7 @@ namespace xscene::commands
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id        = static_cast<xecs::scene::folder_id>(std::strtoul(std::get<std::string>(IdArg).c_str(), nullptr, 16));
             const auto ParentVal = static_cast<xecs::scene::folder_id>(std::strtoul(std::get<std::string>(ParentArg).c_str(), nullptr, 16));
-            const auto Name      = xeditor::Base64Decode(std::get<std::string>(NameArg));
+            const auto Name      = std::get<std::string>(NameArg);
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene) return "CreateFolder: scene not found";

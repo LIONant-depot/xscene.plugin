@@ -125,9 +125,9 @@ namespace xscene
                         , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
                         , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
                         , It->second->m_Guid.m_Value
-                        , xeditor::Base64Encode(Cmd.m_Name)
-                        , xeditor::Base64Encode(Cmd.m_Original.get<std::string>())
-                        , xeditor::Base64Encode(Cmd.m_NewValue.get<std::string>())));
+                        , xeditor::Quote(Cmd.m_Name)
+                        , xeditor::Quote(Cmd.m_Original.get<std::string>())
+                        , xeditor::Quote(Cmd.m_NewValue.get<std::string>())));
                     return;
                 }
 
@@ -142,10 +142,10 @@ namespace xscene
                     , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
                     , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
                     , It->second->m_Guid.m_Value
-                    , xeditor::Base64Encode(Cmd.m_Name)
+                    , xeditor::Quote(Cmd.m_Name)
                     , TypeGuid
-                    , xeditor::Base64Encode(Before)
-                    , xeditor::Base64Encode(After)
+                    , xeditor::Quote(Before)
+                    , xeditor::Quote(After)
                     ));
             };
             Inspector.m_OnChangeEvent.Register(m_OnPropertyChanged);
@@ -233,10 +233,10 @@ namespace xscene
                     , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
                     , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
                     , It->second->m_Guid.m_Value
-                    , xeditor::Base64Encode(std::string(Path))
+                    , xeditor::Quote(std::string(Path))
                     , TypeGuid
-                    , xeditor::Base64Encode(Before)
-                    , xeditor::Base64Encode(After)
+                    , xeditor::Quote(Before)
+                    , xeditor::Quote(After)
                     ));
             };
             Inspector.m_OnOverrideReset.Register(m_OnOverrideReset);
@@ -430,7 +430,7 @@ namespace xscene
                                             , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
                                             , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
                                             , CompIt->second->m_Guid.m_Value
-                                            , xeditor::Base64Encode(std::string(Path))
+                                            , xeditor::Quote(std::string(Path))
                                             , xscene::commands::FormatSceneGuid(Dropped.m_SceneGuid)
                                             , xscene::commands::FormatEntityId(Dropped.m_Id)));
                                     }
@@ -462,7 +462,7 @@ namespace xscene
                                 , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
                                 , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
                                 , CompIt->second->m_Guid.m_Value
-                                , xeditor::Base64Encode(std::string(Path))
+                                , xeditor::Quote(std::string(Path))
                                 , xscene::commands::FormatSceneGuid(xecs::scene::guid{})
                                 , xscene::commands::FormatEntityId(xecs::scene::invalid_permanent_id_v)));
                         }

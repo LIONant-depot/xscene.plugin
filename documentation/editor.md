@@ -34,7 +34,7 @@ them a `scene_context*` as their database.
 | `xscene_commands_apply_overrides.h` | `ApplyOverrides`, `RevertHierarchyOverrides`, `RevertAllOverrides` |
 | `xscene_commands_make_prefab.h` | `MakePrefab`, `MakePrefabVariant` |
 
-Guids and ids travel on the command line as hex, and free text as base64 (`xscene_command_context.h`).
+Guids and ids travel on the command line as hex, and free text in quotes (documentation/Editors/command_line.md).
 
 ## The rest
 

@@ -38,7 +38,7 @@ namespace xscene
                 , xscene::commands::FormatSceneGuid(SceneGuid)
                 , static_cast<std::uint32_t>(Id)
                 , static_cast<std::uint32_t>(TargetFolder)
-                , xeditor::Base64Encode("New Folder")
+                , xeditor::Quote("New Folder")
                 ));
         }
     }

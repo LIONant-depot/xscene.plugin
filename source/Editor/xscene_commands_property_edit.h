@@ -281,17 +281,17 @@ namespace xscene::commands
         set_property_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SetProperty", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Sets one property to a new value (undoable, restores the previous value AND the prefab-override bookkeeping on Undo). Usage: SetProperty -Scene hexguid -Id hexid -Component hex64 -Path base64 -TypeGuid hex32 -Before base64 -After base64";
+            return "Sets one property to a new value (undoable, restores the previous value AND the prefab-override bookkeeping on Undo). Usage: SetProperty -Scene hexguid -Id hexid -Component hex64 -Path text -TypeGuid hex32 -Before text -After text";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",              true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",      true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits",     true, 1);
-            m_hPath      = m_Parser.addOption("Path",      "Property path, base64",                  true, 1);
+            m_hPath      = m_Parser.addOption("Path",      "Property path",                  true, 1);
             m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits", true, 1);
-            m_hBefore    = m_Parser.addOption("Before",    "Previous value, base64",                 true, 1);
-            m_hAfter     = m_Parser.addOption("After",     "New value, base64",                      true, 1);
+            m_hBefore    = m_Parser.addOption("Before",    "Previous value",                 true, 1);
+            m_hAfter     = m_Parser.addOption("After",     "New value",                      true, 1);
         }
 
         std::string Redo() noexcept override
@@ -309,9 +309,9 @@ namespace xscene::commands
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id         = ParseEntityId(std::get<std::string>(IdArg));
             const auto CompGuid   = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
-            const auto Path       = xeditor::Base64Decode(std::get<std::string>(PathArg));
+            const auto Path       = std::get<std::string>(PathArg);
             const auto TypeGuid   = static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
-            const auto After      = xeditor::Base64Decode(std::get<std::string>(AfterArg));
+            const auto After      = std::get<std::string>(AfterArg);
 
             const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, Id, CompGuid);
             if (!Target.m_pInfo) return "SetProperty: target not found";
@@ -350,8 +350,8 @@ namespace xscene::commands
             const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
             const std::uint32_t TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
-            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(PathArg));
-            const std::string   Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(BeforeArg));
+            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
+            const std::string   Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg);
 
             // Resolve the target and record whether an override already exists for THIS Path BEFORE
             // Redo() runs (xundo::system::Execute always calls BackupCurrenState before Redo - see
@@ -414,17 +414,17 @@ namespace xscene::commands
         revert_override_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "RevertOverride", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Reverts one property override to the prefab base value (undoable). Usage: RevertOverride -Scene hexguid -Id hexid -Component hex64 -Path base64 -TypeGuid hex32 -Before base64 -After base64";
+            return "Reverts one property override to the prefab base value (undoable). Usage: RevertOverride -Scene hexguid -Id hexid -Component hex64 -Path text -TypeGuid hex32 -Before text -After text";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",              true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",      true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits",     true, 1);
-            m_hPath      = m_Parser.addOption("Path",      "Property path, base64",                  true, 1);
+            m_hPath      = m_Parser.addOption("Path",      "Property path",                  true, 1);
             m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits", true, 1);
-            m_hBefore    = m_Parser.addOption("Before",    "Overridden value before revert, base64", true, 1);
-            m_hAfter     = m_Parser.addOption("After",     "Prefab base value, base64",              true, 1);
+            m_hBefore    = m_Parser.addOption("Before",    "Overridden value before revert", true, 1);
+            m_hAfter     = m_Parser.addOption("After",     "Prefab base value",              true, 1);
         }
 
         std::string Redo() noexcept override
@@ -442,9 +442,9 @@ namespace xscene::commands
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id         = ParseEntityId(std::get<std::string>(IdArg));
             const auto CompGuid   = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
-            const auto Path       = xeditor::Base64Decode(std::get<std::string>(PathArg));
+            const auto Path       = std::get<std::string>(PathArg);
             const auto TypeGuid   = static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
-            const auto After      = xeditor::Base64Decode(std::get<std::string>(AfterArg));
+            const auto After      = std::get<std::string>(AfterArg);
 
             const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, Id, CompGuid);
             if (!Target.m_pInfo) return "RevertOverride: target not found";
@@ -467,8 +467,8 @@ namespace xscene::commands
             const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
             const std::uint32_t TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
-            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(PathArg));
-            const std::string   Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(BeforeArg));
+            const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
+            const std::string   Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg);
 
             File.Write(Scene);
             File.Write(Id);
@@ -509,16 +509,16 @@ namespace xscene::commands
         snapshot_edit_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SnapshotEdit", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Applies an Inspector snapshot edit to one component (undoable). Usage: SnapshotEdit -Scene hexguid -Id hexid -Component hex64 -Label base64 -Before base64 -After base64";
+            return "Applies an Inspector snapshot edit to one component (undoable). Usage: SnapshotEdit -Scene hexguid -Id hexid -Component hex64 -Label text -Before text -After text";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits", true, 1);
-            m_hLabel     = m_Parser.addOption("Label",     "What the edit did, base64",          true, 1);
-            m_hBefore    = m_Parser.addOption("Before",    "State before, base64",               true, 1);
-            m_hAfter     = m_Parser.addOption("After",     "State after, base64",                true, 1);
+            m_hLabel     = m_Parser.addOption("Label",     "What the edit did",          true, 1);
+            m_hBefore    = m_Parser.addOption("Before",    "State before",               true, 1);
+            m_hAfter     = m_Parser.addOption("After",     "State after",                true, 1);
         }
 
         void Apply(xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::uint64_t Component, const std::string& Snapshot) noexcept
@@ -557,7 +557,7 @@ namespace xscene::commands
             const auto Component = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
             if (!ResolvePropertyTarget(SceneContext(), SceneGuid, Id, Component).m_pInfo) return "SnapshotEdit: target not found";
 
-            Apply(SceneGuid, Id, Component, xeditor::Base64Decode(std::get<std::string>(AfterArg)));
+            Apply(SceneGuid, Id, Component, std::get<std::string>(AfterArg));
             return {};
         }
 
@@ -571,7 +571,7 @@ namespace xscene::commands
             File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
             File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
             File.Write(std::holds_alternative<xerr>(CompArg)  ? std::uint64_t{0} : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16));
-            xeditor::WriteString(File, std::holds_alternative<xerr>(BeforeArg) ? std::string{} : xeditor::Base64Decode(std::get<std::string>(BeforeArg)));
+            xeditor::WriteString(File, std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg));
         }
 
         void Undo(xundo::undo_file& File) noexcept override
@@ -627,8 +627,8 @@ namespace xscene::commands
             if (It == Before.end() || It->m_Value == A.m_Value) continue;
             Cmds.push_back(std::format("SetProperty -Scene {} -Id {} -Component {:016X} -Path {} -TypeGuid {:08X} -Before {} -After {}"
                 , FormatSceneGuid(SceneGuid), FormatEntityId(Id), ComponentGuid
-                , xeditor::Base64Encode(A.m_Path), A.m_TypeGuid
-                , xeditor::Base64Encode(It->m_Value), xeditor::Base64Encode(A.m_Value)));
+                , xeditor::Quote(A.m_Path), A.m_TypeGuid
+                , xeditor::Quote(It->m_Value), xeditor::Quote(A.m_Value)));
         }
         return Cmds;
     }

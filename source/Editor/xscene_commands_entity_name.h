@@ -12,13 +12,13 @@ namespace xscene::commands
         rename_entity_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "RenameEntity", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Gives an entity a display name (undoable). Usage: RenameEntity -Scene hexguid -Id hexid -Name base64 | -Clear 1 (back to Entity #id)";
+            return "Gives an entity a display name (undoable). Usage: RenameEntity -Scene hexguid -Id hexid -Name text | -Clear 1 (back to Entity #id)";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene = m_Parser.addOption("Scene", "Scene guid, 16 hex digits",        true,  1);
             m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 hex digits", true,  1);
-            m_hName  = m_Parser.addOption("Name",  "New name, Base64-encoded",          false, 1);
+            m_hName  = m_Parser.addOption("Name",  "New name",          false, 1);
             m_hClear = m_Parser.addOption("Clear", "1 = remove the name",               false, 1);
         }
 
@@ -40,7 +40,7 @@ namespace xscene::commands
             else
             {
                 if (std::holds_alternative<xerr>(NameArg)) return "RenameEntity: needs -Name or -Clear 1";
-                const std::string Name = xeditor::Base64Decode(std::get<std::string>(NameArg));
+                const std::string Name = std::get<std::string>(NameArg);
                 if (Name.empty()) pScene->m_EntityNames.erase(Id);
                 else              pScene->m_EntityNames[Id] = Name;
             }
