@@ -23,7 +23,7 @@ namespace xscene
     // "Systems (N)" popup - what runs on this entity and what it touches, what doesn't run and why,
     // and what removing each component would change. Same data as DescribeEntity's pipe output.
     //---------------------------------------------------------------------------
-    inline void RenderEntitySystemsPopupContents(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
+    inline void RenderEntitySystemsPopupContents(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity, const component_display& Display) noexcept
     {
         namespace su = xscene::system_usage;
         const auto  Systems    = su::AllSystems(GameMgr);
@@ -56,7 +56,7 @@ namespace xscene
             if (ImGui::IsItemHovered())
             {
                 const std::string Body = S.m_bUpdate ? std::format("Update system, runs #{} in the frame", S.m_Order) : std::string("Notifier system (runs on entity create/destroy/move events)");
-                const std::string From = xscene::DescribeSource(xscene::SourceOfType(true, S.m_pInfo->m_Guid.m_Value));
+                const std::string From = xscene::DescribeSource(Display.SourceOf(true, S.m_pInfo->m_Guid.m_Value));
                 xeditor::hint::Draw({ .m_Topic = su::SystemName(S), .m_Body = Body, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
             }
             if (!S.m_bEnabled) { ImGui::SameLine(); ImGui::TextColored(WarnColor, "(disabled in System Registry)"); }
@@ -113,6 +113,7 @@ namespace xscene
     {
         auto& GameMgr = Ed.World();
         auto& State   = Ed.m_State;
+        const auto& Categories = Ed.Display().m_Categories;
         ImGui::SetNextWindowPos(ImVec2(18, 18), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(480, 500), ImGuiCond_FirstUseEver);
         const bool bWindowVisible = ImGui::Begin(pWindowName);
@@ -189,7 +190,7 @@ namespace xscene
                     ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
                     if (ImGui::BeginPopup(kSystemsPopupId))
                     {
-                        RenderEntitySystemsPopupContents(GameMgr, State.m_SelectedEntity);
+                        RenderEntitySystemsPopupContents(GameMgr, State.m_SelectedEntity, Ed.Display());
                         ImGui::EndPopup();
                     }
                 }
@@ -263,7 +264,7 @@ namespace xscene
                 // headers inside the component list itself), defaults to "All" (no filter), and only
                 // shows categories actually present on THIS entity's own attached components - "if
                 // the entity does not have the category then we do not need to add that particular
-                // category at the top". Categories come from xscene::g_ComponentDisplayInfo
+                // category at the top". Categories come from Categories
                 // (E29_GamePluginLoad.h), populated from whatever Script-Module components the
                 // currently-loaded Game.dll generation self-registered with a category (built-in
                 // engine components like Transform/Name never appear here, since they never go
@@ -272,7 +273,7 @@ namespace xscene
                     std::vector<std::string> PresentCategories;
                     for (auto pInfo : DataSpan)
                     {
-                        if (auto It = xscene::g_ComponentDisplayInfo.find(pInfo->m_pName); It != xscene::g_ComponentDisplayInfo.end() && !It->second.m_Category.empty())
+                        if (auto It = Categories.find(pInfo->m_pName); It != Categories.end() && !It->second.m_Category.empty())
                             if (std::find(PresentCategories.begin(), PresentCategories.end(), It->second.m_Category) == PresentCategories.end())
                                 PresentCategories.push_back(It->second.m_Category);
                     }
@@ -324,15 +325,15 @@ namespace xscene
                     std::erase_if(SortedComponents, [&](const xecs::component::type::info* pInfo) noexcept
                     {
                         if (State.m_ComponentCategoryFilter.empty()) return false;
-                        auto It = xscene::g_ComponentDisplayInfo.find(pInfo->m_pName);
-                        return It == xscene::g_ComponentDisplayInfo.end() || It->second.m_Category != State.m_ComponentCategoryFilter;
+                        auto It = Categories.find(pInfo->m_pName);
+                        return It == Categories.end() || It->second.m_Category != State.m_ComponentCategoryFilter;
                     });
-                    std::stable_sort(SortedComponents.begin(), SortedComponents.end(), [](const xecs::component::type::info* A, const xecs::component::type::info* B) noexcept
+                    std::stable_sort(SortedComponents.begin(), SortedComponents.end(), [&Categories](const xecs::component::type::info* A, const xecs::component::type::info* B) noexcept
                     {
-                        auto ItA = xscene::g_ComponentDisplayInfo.find(A->m_pName);
-                        auto ItB = xscene::g_ComponentDisplayInfo.find(B->m_pName);
-                        const bool bHasA = ItA != xscene::g_ComponentDisplayInfo.end();
-                        const bool bHasB = ItB != xscene::g_ComponentDisplayInfo.end();
+                        auto ItA = Categories.find(A->m_pName);
+                        auto ItB = Categories.find(B->m_pName);
+                        const bool bHasA = ItA != Categories.end();
+                        const bool bHasB = ItB != Categories.end();
                         if (!bHasA && !bHasB) return false;
                         if (!bHasA) return true;
                         if (!bHasB) return false;
@@ -410,7 +411,7 @@ namespace xscene
                         {
                             const auto Used = xscene::system_usage::UsedBy(xscene::system_usage::AllSystems(GameMgr), pInfo->m_Guid.m_Value);
                             const std::string Body = Used.empty() ? std::string("Tag component - no properties.\nNot used by any system.") : "Tag component - no properties.\nUsed by: " + Used;
-                            const std::string From = xscene::DescribeSource(xscene::SourceOfType(false, pInfo->m_Guid.m_Value));
+                            const std::string From = xscene::DescribeSource(Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value));
                             xeditor::hint::Draw({ .m_Topic = pLabel, .m_Body = Body, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
                         }
                         pDrawList->AddText(ImVec2(Min.x + FramePad.x, Min.y + FramePad.y), ImGui::GetColorU32(ImGuiCol_Text), pLabel);

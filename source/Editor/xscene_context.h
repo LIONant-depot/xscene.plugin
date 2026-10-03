@@ -1,4 +1,5 @@
 #pragma once
+#include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
 
 // What the scene editing code works on: which scenes are open, which entity is selected, and the world and undo it edits.
 // Nothing here knows about levels or Play, so the scene code can be used by any editor that opens scenes.
@@ -42,8 +43,10 @@ namespace xscene
         scene_state&                               m_State;
         std::unique_ptr<xecs::game_mgr::instance>& m_pWorld;
         xundo::system&                             m_Undo;      // every edit of this editor's document goes through it
+        component_display*                         m_pDisplay = nullptr;     // what this editor knows about its types (its game module's categories and sources), set by its session
 
         xecs::game_mgr::instance& World() noexcept { return *m_pWorld; }
+        const component_display& Display() const noexcept { static const component_display s_Nothing; return m_pDisplay ? *m_pDisplay : s_Nothing; }
     };
 
     // The active editor's scene context, provided to the host at startup. For code that has no session of its own, such as

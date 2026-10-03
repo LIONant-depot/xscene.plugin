@@ -70,12 +70,12 @@ namespace xscene
             const char* pName = pInfo->m_pName ? pInfo->m_pName : "";
             // The search looks at the module's name too: typing "Soccer" finds the components of the SoccerGame module
             if (bHasSearch && !xeditor::ContainsCaseInsensitive(pName, State.m_ComponentSelectorSearchString)
-                && !xeditor::ContainsCaseInsensitive(xscene::SourceOfType(false, pInfo->m_Guid.m_Value).m_ModuleName.c_str(), State.m_ComponentSelectorSearchString))
+                && !xeditor::ContainsCaseInsensitive(Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value).m_ModuleName.c_str(), State.m_ComponentSelectorSearchString))
                 continue;
 
             std::string Category;
             int         Priority = 0;
-            if (auto It = xscene::g_ComponentDisplayInfo.find(pInfo->m_pName); It != xscene::g_ComponentDisplayInfo.end())
+            if (auto It = Ed.Display().m_Categories.find(pInfo->m_pName); It != Ed.Display().m_Categories.end())
             {
                 Category = It->second.m_Category;
                 Priority = It->second.m_Priority;
@@ -152,7 +152,7 @@ namespace xscene
                 if (ImGui::IsItemHovered())
                 {
                     const std::string Change = xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true);
-                    const std::string From   = xscene::DescribeSource(xscene::SourceOfType(false, Comp.m_pInfo->m_Guid.m_Value));
+                    const std::string From   = xscene::DescribeSource(Ed.Display().SourceOf(false, Comp.m_pInfo->m_Guid.m_Value));
                     xeditor::hint::Draw({ .m_Topic = Comp.m_pInfo->m_pName ? Comp.m_pInfo->m_pName : "?", .m_Body = Change, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
                 }
 

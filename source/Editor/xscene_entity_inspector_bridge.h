@@ -281,7 +281,7 @@ namespace xscene
 
                 // Where the component comes from, as a quiet tag left of the buttons: the script module that defines it. Hover says the file; a click opens it (in the module's editor).
                 // Nothing for the engine's own components, and nothing when the row has no room next to the name.
-                const auto Source = xscene::SourceOfType(false, pInfo->m_Guid.m_Value);
+                const auto Source = Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value);
                 auto DrawSourceTag = [&](float RightLimitX) noexcept
                 {
                     if (!Source.m_bKnown || Source.m_Module == 0 || Source.m_ModuleName.empty()) return;
