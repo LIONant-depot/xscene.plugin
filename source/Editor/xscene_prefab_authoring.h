@@ -5,6 +5,7 @@
 #include "dependencies/xeditor/include/xeditor/session.h"
 
 #include "dependencies/xundo/source/xundo_system.h"
+#include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
 
 // Extracted from xscene_entity_inspector_bridge.h (mechanical move, phase 2 of the kit split - see the
 // umbrella file's own top comment). Prefab creation/instancing/deletion (RegisterInstantiatedSubtree
@@ -28,13 +29,12 @@ namespace xscene
         Scene.m_RuntimeToLocal[Entity.m_Value]  = Id;
         GameMgr.m_SceneMgr.MarkEntityNew(SceneGuid, Id);
 
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if (Details.m_pPool == nullptr) return;
-        if (Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID) == false) return;
+        auto* pChildren = xlioncore::Ecs(GameMgr).ChildrenOf(Entity);
+        if (pChildren == nullptr) return;
 
         // Snapshot - registering a child only ever touches Scene's own maps, never this entity's OWN
         // children list, so a plain copy is enough (no in-place-mutation hazard to guard against here).
-        auto ChildEntities = Details.m_pPool->getComponent<xecs::component::children>(Details.m_PoolIndex).m_List;
+        auto ChildEntities = pChildren->m_List;
         for (auto Child : ChildEntities)
             RegisterInstantiatedSubtree(GameMgr, Scene, SceneGuid, Child);
     }
@@ -80,7 +80,7 @@ namespace xscene
         if (bRecordPrefabOverride)
             RecordRemovedChildOverride(GameMgr, Scene, SceneGuid, Entity);
 
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
+        auto& Ecs = xlioncore::Ecs(GameMgr);
 
         // Scrub Entity out of its own parent's children list, if it has one - otherwise the parent
         // keeps holding a dangling handle to an entity that's about to stop existing, rendering as a
@@ -88,15 +88,14 @@ namespace xscene
         // clicked) - a recursive call's own parent is itself being deleted this same pass, so
         // scrubbing it is harmless but moot; doing it unconditionally here is simpler than threading a
         // "is this the top call" flag through the recursion.
-        if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
+        if (auto* pParent = Ecs.ParentOf(Entity))
         {
-            const auto ParentEntity = Details.m_pPool->getComponent<xecs::component::parent>(Details.m_PoolIndex).m_Value;
+            const auto ParentEntity = pParent->m_Value;
             if (ParentEntity.isValid())
             {
-                auto& PDetails = GameMgr.m_ComponentMgr.getEntityDetails(ParentEntity);
-                if (PDetails.m_pPool && PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                if (auto* pParentChildren = Ecs.ChildrenOf(ParentEntity))
                 {
-                    auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
+                    auto& List = pParentChildren->m_List;
                     std::erase_if(List, [&](auto& E) noexcept { return E.m_Value == Entity.m_Value; });
                     if (auto ParentIt = Scene.m_RuntimeToLocal.find(ParentEntity.m_Value); ParentIt != Scene.m_RuntimeToLocal.end())
                         GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, ParentIt->second);
@@ -104,9 +103,9 @@ namespace xscene
             }
         }
 
-        if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+        if (auto* pChildren = Ecs.ChildrenOf(Entity))
         {
-            auto ChildEntities = Details.m_pPool->getComponent<xecs::component::children>(Details.m_PoolIndex).m_List;
+            auto ChildEntities = pChildren->m_List;
             for (auto Child : ChildEntities)
                 DeleteEntitySubtree(GameMgr, Scene, SceneGuid, Child, /*bRecordPrefabOverride*/ false);
         }
@@ -120,8 +119,7 @@ namespace xscene
             ReparentEntityIntoFolder(Scene, Id, xecs::scene::invalid_folder_id_v);
         }
 
-        auto E = Entity;
-        GameMgr.DeleteEntity(E);
+        Ecs.DeleteEntity(Entity);
     }
 
     // The Level tree's "Make Prefab" action - the multi-entity-aware counterpart of dragging a single
@@ -163,10 +161,9 @@ namespace xscene
         std::vector<xecs::component::entity> TopLevel;
         for (auto E : SelectedEntities)
         {
-            auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(E);
             bool bParentSelected = false;
-            if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
-                bParentSelected = IsSelected(Details.m_pPool->getComponent<xecs::component::parent>(Details.m_PoolIndex).m_Value);
+            if (auto* pParent = xlioncore::Ecs(GameMgr).ParentOf(E))
+                bParentSelected = IsSelected(pParent->m_Value);
             if (!bParentSelected) TopLevel.push_back(E);
         }
         std::printf("[MakePrefab] DetermineGroupRoot: %zu top-level entity(ies) among the selection\n", TopLevel.size());
@@ -183,19 +180,17 @@ namespace xscene
         // back to whichever folder (if any) the FIRST top-level entity was in when there's no external
         // parent, and using ITS choice when several top-level entities disagree.
         xecs::component::entity InheritedParent;
-        if (auto& FirstDetails = GameMgr.m_ComponentMgr.getEntityDetails(TopLevel.front()); FirstDetails.m_pPool && FirstDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
-            InheritedParent = FirstDetails.m_pPool->getComponent<xecs::component::parent>(FirstDetails.m_PoolIndex).m_Value;
+        auto& Ecs = xlioncore::Ecs(GameMgr);
+        if (auto* pFirstParent = Ecs.ParentOf(TopLevel.front()))
+            InheritedParent = pFirstParent->m_Value;
         const auto InheritedFolderId = InheritedParent.isValid() ? xecs::scene::invalid_folder_id_v : FindFolderContaining(Scene, Scene.m_RuntimeToLocal.at(TopLevel.front().m_Value));
 
-        auto& RootArchetype = GameMgr.getOrCreateArchetype<xecs::component::children>();
-        auto  Root          = RootArchetype.CreateEntity();
+        auto Root = xlioncore::CreateEntityOf<xecs::component::children>(Ecs);
 
         if (InheritedParent.isValid())
         {
-            std::array Add{ &xecs::component::type::info_v<xecs::component::parent> };
-            Root = GameMgr.AddOrRemoveComponents(Root, Add, {});
-            auto& RootPDetails = GameMgr.m_ComponentMgr.getEntityDetails(Root);
-            RootPDetails.m_pPool->getComponent<xecs::component::parent>(RootPDetails.m_PoolIndex).m_Value = InheritedParent;
+            Root = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, Root);
+            Ecs.ParentOf(Root)->m_Value = InheritedParent;
 
             // Splice Root into whatever position the FIRST top-level entity held in ITS parent's own
             // children list, replacing it - the parent's list otherwise keeps pointing at that entity's
@@ -207,10 +202,9 @@ namespace xscene
             // be migrated to a new handle by the reparent loop below, so leaving its OLD entry here
             // would be both a duplicate membership (appears under InheritedParent AND under Root) and
             // a dangling one (pointing at a handle the migration is about to invalidate).
-            auto& ExtParentDetails = GameMgr.m_ComponentMgr.getEntityDetails(InheritedParent);
-            if (ExtParentDetails.m_pPool && ExtParentDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+            if (auto* pExtChildren = Ecs.ChildrenOf(InheritedParent))
             {
-                auto& ExtChildren = ExtParentDetails.m_pPool->getComponent<xecs::component::children>(ExtParentDetails.m_PoolIndex).m_List;
+                auto& ExtChildren = pExtChildren->m_List;
                 bool bSplicedRoot = false;
                 std::erase_if(ExtChildren, [&](auto& C) noexcept
                 {
@@ -233,18 +227,15 @@ namespace xscene
         {
             const auto OldId = Scene.m_RuntimeToLocal.at(E.m_Value);
 
-            std::array Add{ &xecs::component::type::info_v<xecs::component::parent> };
-            auto NewE = GameMgr.AddOrRemoveComponents(E, Add, {});
-            auto& NewDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewE);
-            NewDetails.m_pPool->getComponent<xecs::component::parent>(NewDetails.m_PoolIndex).m_Value = Root;
+            auto NewE = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, E);
+            Ecs.ParentOf(NewE)->m_Value = Root;
 
             Scene.m_RuntimeToLocal.erase(E.m_Value);
             Scene.m_LocalToRuntime[OldId]         = NewE;
             Scene.m_RuntimeToLocal[NewE.m_Value]  = OldId;
             GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, OldId);
 
-            auto& RootDetails = GameMgr.m_ComponentMgr.getEntityDetails(Root);
-            RootDetails.m_pPool->getComponent<xecs::component::children>(RootDetails.m_PoolIndex).m_List.push_back(NewE);
+            Ecs.ChildrenOf(Root)->m_List.push_back(NewE);
 
             if (State.m_SelectedEntityId == OldId)
             {
@@ -273,8 +264,8 @@ namespace xscene
         // captured here so the freshly-instantiated root can be spliced back into the exact same
         // position afterward, rather than unexpectedly falling out to scene-root.
         xecs::component::entity OriginalParent;
-        if (auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Root); RD.m_pPool && RD.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
-            OriginalParent = RD.m_pPool->getComponent<xecs::component::parent>(RD.m_PoolIndex).m_Value;
+        if (auto* pRootParent = xlioncore::Ecs(GameMgr).ParentOf(Root))
+            OriginalParent = pRootParent->m_Value;
 
         const auto RootId           = Scene.m_RuntimeToLocal.at(Root.m_Value);
         const bool bRootWasSelected = pState && (pState->m_SelectedEntityId == RootId);
@@ -318,24 +309,21 @@ namespace xscene
 
         if (OriginalParent.isValid())
         {
-            std::array Add{ &xecs::component::type::info_v<xecs::component::parent> };
-            NewRoot = GameMgr.AddOrRemoveComponents(NewRoot, Add, {});
-            auto& NRDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewRoot);
-            NRDetails.m_pPool->getComponent<xecs::component::parent>(NRDetails.m_PoolIndex).m_Value = OriginalParent;
+            auto& Ecs = xlioncore::Ecs(GameMgr);
+            NewRoot = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, NewRoot);
+            Ecs.ParentOf(NewRoot)->m_Value = OriginalParent;
 
-            auto& OPDetails = GameMgr.m_ComponentMgr.getEntityDetails(OriginalParent);
-            if (OPDetails.m_pPool && OPDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+            if (auto* pOriginalChildren = Ecs.ChildrenOf(OriginalParent))
             {
-                auto& OPChildren = OPDetails.m_pPool->getComponent<xecs::component::children>(OPDetails.m_PoolIndex).m_List;
+                auto& OPChildren = pOriginalChildren->m_List;
                 for (auto& C : OPChildren)
                     if (C.m_Value == StaleRootValue) { C = NewRoot; break; }
             }
         }
 
-        auto& NewChildDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewRoot);
-        if (NewChildDetails.m_pPool && NewChildDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
         {
-            auto ChildEntities = NewChildDetails.m_pPool->getComponent<xecs::component::children>(NewChildDetails.m_PoolIndex).m_List;
+            auto ChildEntities = pNewChildren->m_List;
             std::printf("[MakePrefab] CreatePrefabFromGroupRoot: NewRoot has %zu child(ren) to register\n", ChildEntities.size());
             std::fflush(stdout);
             for (auto Child : ChildEntities)
@@ -449,8 +437,7 @@ namespace xscene
         // the new variant looks like, since it's what the variant was just captured FROM. Overrides are
         // cleared (matching AttachPrefabInstanceComponent's own reasoning) since they were computed
         // relative to whatever this entity pointed at BEFORE - a save recomputes them fresh regardless.
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        auto& PI = Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+        auto& PI = *xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(GameMgr), Entity);
         PI.m_PrefabInstance = PrefabGuid;
         PI.m_lComponents.clear();
         PI.m_ComponentDiffs.clear();

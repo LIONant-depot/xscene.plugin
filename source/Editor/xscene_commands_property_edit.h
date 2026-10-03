@@ -48,33 +48,9 @@ namespace xscene::commands
         if (It == pScene->m_LocalToRuntime.end()) return Out;
         Out.m_Entity = It->second;
 
-        Out.m_pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ ComponentGuidValue });
-        if (!Out.m_pInfo) return Out;
-
-        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Out.m_Entity);
-        if (!Details.m_pPool) { Out.m_pInfo = nullptr; return Out; }
-        const auto iType = Details.m_pPool->findIndexComponentFromInfo(*Out.m_pInfo);
-        if (iType >= 0)
-        {
-            Out.m_pInstance = &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * Out.m_pInfo->m_Size];
-            return Out;
-        }
-        // SHARE components live on a share-entity referenced by the pool family, not in the entity data pool.
-        if (Out.m_pInfo->m_TypeID == xecs::component::type::id::SHARE && Details.m_pPool->m_pMyFamily)
-        {
-            auto* pFamily = Details.m_pPool->m_pMyFamily;
-            for (int i = 0, end = static_cast<int>(pFamily->m_ShareInfos.size()); i < end; ++i)
-            {
-                if (pFamily->m_ShareInfos[i]->m_Guid.m_Value != Out.m_pInfo->m_Guid.m_Value) continue;
-                auto& ShareDetails = Ed.World().m_ComponentMgr.getEntityDetails(pFamily->m_ShareDetails[i].m_Entity);
-                if (!ShareDetails.m_pPool) break;
-                const auto iShare = ShareDetails.m_pPool->findIndexComponentFromInfo(*Out.m_pInfo);
-                if (iShare < 0) break;
-                Out.m_pInstance = &ShareDetails.m_pPool->m_pComponent[iShare][ShareDetails.m_PoolIndex.m_Value * Out.m_pInfo->m_Size];
-                return Out;
-            }
-        }
-        Out.m_pInfo = nullptr;
+        // The data of the component (a SHARE component through the entity that holds it) and what describes it: found inside the copy of the core the world belongs to.
+        Out.m_pInstance = xlioncore::Ecs(Ed.World()).ResolveComponent(Out.m_Entity, xecs::component::type::guid{ ComponentGuidValue }, Out.m_pInfo);
+        if (!Out.m_pInstance) Out.m_pInfo = nullptr;
         return Out;
     }
 
