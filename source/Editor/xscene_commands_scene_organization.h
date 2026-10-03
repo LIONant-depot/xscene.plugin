@@ -250,10 +250,9 @@ namespace xscene::commands
         Scene.m_RuntimeToLocal[NewRoot.m_Value] = ExplicitRootId;
         GameMgr.m_SceneMgr.MarkEntityNew(Scene.m_Guid, ExplicitRootId);
 
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(NewRoot);
-        if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
         {
-            auto ChildEntities = Details.m_pPool->getComponent<xecs::component::children>(Details.m_PoolIndex).m_List;
+            auto ChildEntities = pNewChildren->m_List;
             for (auto Child : ChildEntities)
                 xscene::RegisterInstantiatedSubtree(GameMgr, Scene, Scene.m_Guid, Child);
         }
@@ -383,8 +382,7 @@ namespace xscene::commands
 
             // A parented entity is never a folder member (rendered nested under its parent's own row
             // instead) - matches every existing drag-drop call site's own bHasParent check.
-            auto& Details = World().m_ComponentMgr.getEntityDetails(pScene->m_LocalToRuntime.at(Id));
-            if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
+            if (xlioncore::Ecs(World()).ParentOf(pScene->m_LocalToRuntime.at(Id)))
                 return "MoveToFolder: entity has a parent, not a folder member";
 
             xscene::ReparentEntityIntoFolder(*pScene, Id, FolderVal);

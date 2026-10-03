@@ -216,11 +216,10 @@ namespace xscene::commands
         const auto PIRootId = static_cast<xecs::scene::permanent_id>(PIRootIdVal);
         if (!pScene->m_LocalToRuntime.contains(PIRootId)) return;
         auto Entity = pScene->m_LocalToRuntime.at(PIRootId);
-        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Entity);
-        const auto iType = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-        if (iType < 0) return;
+        auto* pPrefabInstance = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(Ed.World()), Entity);
+        if (!pPrefabInstance) return;
 
-        auto& PI = Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+        auto& PI = *pPrefabInstance;
         PI.m_lComponents    = std::move(OldComponents);
         PI.m_HierarchyDiffs = std::move(OldHierarchy);
         Ed.World().m_SceneMgr.MarkEntityDirty(SceneGuid, PIRootId);
@@ -289,19 +288,18 @@ namespace xscene::commands
             xecs::scene::permanent_id RootParentId = xecs::scene::invalid_permanent_id_v;
             std::uint32_t             ChildIndex   = 0;
             auto RootEntity = pScene->m_LocalToRuntime.at(RootId);
-            auto& RootDetails = Ed.World().m_ComponentMgr.getEntityDetails(RootEntity);
-            if (RootDetails.m_pPool && RootDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
+            auto& Ecs = xlioncore::Ecs(Ed.World());
+            if (auto* pRootParent = Ecs.ParentOf(RootEntity))
             {
-                const auto ParentEntity = RootDetails.m_pPool->getComponent<xecs::component::parent>(RootDetails.m_PoolIndex).m_Value;
+                const auto ParentEntity = pRootParent->m_Value;
                 if (ParentEntity.isValid())
                 {
                     if (auto ParentIt = pScene->m_RuntimeToLocal.find(ParentEntity.m_Value); ParentIt != pScene->m_RuntimeToLocal.end())
                     {
                         RootParentId = ParentIt->second;
-                        auto& PDetails = Ed.World().m_ComponentMgr.getEntityDetails(ParentEntity);
-                        if (PDetails.m_pPool && PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                        if (auto* pParentChildren = Ecs.ChildrenOf(ParentEntity))
                         {
-                            auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
+                            auto& List = pParentChildren->m_List;
                             if (auto ChildIt = std::ranges::find(List, RootEntity.m_Value, &xecs::component::entity::m_Value); ChildIt != List.end())
                                 ChildIndex = static_cast<std::uint32_t>(ChildIt - List.begin());
                         }
@@ -337,14 +335,13 @@ namespace xscene::commands
 
             Entries.push_back({ RealId, ShadowId });
 
-            auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Entity);
-            if (Details.m_pPool && Details.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+            if (auto* pChildren = xlioncore::Ecs(Ed.World()).ChildrenOf(Entity))
             {
                 // Copy, not reference - matches DeleteEntitySubtree's own pattern (xscene_prefab_authoring.h):
                 // SaveEntity below can (in principle) touch pool memory, and iterating a reference into a
                 // container that might reallocate underneath the loop is exactly the class of bug
                 // dependencies/xECSV2/doc/pool_reallocation_hazard.md already covers.
-                auto ChildList = Details.m_pPool->getComponent<xecs::component::children>(Details.m_PoolIndex).m_List;
+                auto ChildList = pChildren->m_List;
                 for (auto Child : ChildList) Walk(Child);
             }
         };
@@ -448,8 +445,7 @@ namespace xscene::commands
         // the real scene-load path this mirrors).
         for (auto Entity : Restored)
         {
-            auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Entity);
-            if (Details.m_pPool && Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) >= 0)
+            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(Ed.World()), Entity))
                 xecs::persist::details::ApplyPrefabInstancePropertyOverrides(Ed.World(), Entity);
         }
 
@@ -483,12 +479,11 @@ namespace xscene::commands
         {
             if (auto ParentIt = pScene->m_LocalToRuntime.find(static_cast<xecs::scene::permanent_id>(RootParentId)); ParentIt != pScene->m_LocalToRuntime.end())
             {
-                auto& PDetails = Ed.World().m_ComponentMgr.getEntityDetails(ParentIt->second);
-                if (PDetails.m_pPool && PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                if (auto* pParentChildren = xlioncore::Ecs(Ed.World()).ChildrenOf(ParentIt->second))
                 {
                     if (auto RootIt = pScene->m_LocalToRuntime.find(RootId); RootIt != pScene->m_LocalToRuntime.end())
                     {
-                        auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
+                        auto& List = pParentChildren->m_List;
                         if (std::ranges::find(List, RootIt->second.m_Value, &xecs::component::entity::m_Value) == List.end())
                         {
                             const auto InsertAt = std::min(static_cast<std::size_t>(ChildIndex), List.size());
@@ -570,29 +565,25 @@ namespace xscene::commands
                 // xscene_commands_component_edit.h, does the caller-responsibility scene-map remap this
                 // already needs), so re-resolve everything through it rather than trusting the local
                 // `Entity` above afterward.
-                std::array<const xecs::component::type::info*, 1> AddParent{ &xecs::component::type::info_v<xecs::component::parent> };
-                const auto NewChildEntity = MigrateEntityComponents(SceneContext(), SceneGuid, Id, AddParent, {});
+                const std::array AddParent{ xlioncore::GuidOf<xecs::component::parent>() };
+                const auto NewChildEntity = MigrateEntityComponentGuids(SceneContext(), SceneGuid, Id, AddParent, {});
                 if (!NewChildEntity.isValid()) return "CreateEntity: failed to attach parent";
 
                 // Ensure the PARENT also has a `children` component - a freshly-authored entity usually
                 // doesn't have one yet the first time it gains a child.
                 auto ParentEntity = pScene->m_LocalToRuntime.at(ParentId);
-                auto& PDetails = World().m_ComponentMgr.getEntityDetails(ParentEntity);
-                if (!PDetails.m_pPool || !PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                if (!xlioncore::Ecs(World()).ChildrenOf(ParentEntity))
                 {
-                    std::array<const xecs::component::type::info*, 1> AddChildren{ &xecs::component::type::info_v<xecs::component::children> };
-                    ParentEntity = MigrateEntityComponents(SceneContext(), SceneGuid, ParentId, AddChildren, {});
+                    const std::array AddChildren{ xlioncore::GuidOf<xecs::component::children>() };
+                    ParentEntity = MigrateEntityComponentGuids(SceneContext(), SceneGuid, ParentId, AddChildren, {});
                     if (!ParentEntity.isValid()) return "CreateEntity: failed to attach children to parent";
                 }
 
                 // Wire up both sides directly - these two fields are structural ECS bookkeeping, not
                 // user-editable data (see DeleteEntitySubtree's own identical direct-pool-access pattern
                 // for parent/children, xscene_prefab_authoring.h), so no xproperty round trip needed here.
-                auto& ChildDetails = World().m_ComponentMgr.getEntityDetails(NewChildEntity);
-                ChildDetails.m_pPool->getComponent<xecs::component::parent>(ChildDetails.m_PoolIndex).m_Value = ParentEntity;
-
-                auto& ParentDetails = World().m_ComponentMgr.getEntityDetails(ParentEntity);
-                ParentDetails.m_pPool->getComponent<xecs::component::children>(ParentDetails.m_PoolIndex).m_List.push_back(NewChildEntity);
+                xlioncore::Ecs(World()).ParentOf(NewChildEntity)->m_Value = ParentEntity;
+                xlioncore::Ecs(World()).ChildrenOf(ParentEntity)->m_List.push_back(NewChildEntity);
 
                 // Prefab composition: child under a PI is an instance hierarchy add (m_bAdded).
                 xscene::RecordAddedChildOverride(World(), *pScene, SceneGuid, NewChildEntity);
@@ -635,8 +626,7 @@ namespace xscene::commands
                 {
                     if (auto It = pScene->m_LocalToRuntime.find(static_cast<xecs::scene::permanent_id>(ParentId)); It != pScene->m_LocalToRuntime.end())
                     {
-                        auto& PDetails = World().m_ComponentMgr.getEntityDetails(It->second);
-                        bParentAlreadyHadChildren = PDetails.m_pPool && PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID);
+                        bParentAlreadyHadChildren = xlioncore::Ecs(World()).ChildrenOf(It->second) != nullptr;
                     }
                 }
             }
@@ -671,14 +661,13 @@ namespace xscene::commands
                 {
                     if (auto It = pScene->m_LocalToRuntime.find(static_cast<xecs::scene::permanent_id>(ParentId)); It != pScene->m_LocalToRuntime.end())
                     {
-                        auto& PDetails = World().m_ComponentMgr.getEntityDetails(It->second);
-                        if (PDetails.m_pPool && PDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                        if (auto* pParentChildren = xlioncore::Ecs(World()).ChildrenOf(It->second))
                         {
-                            const auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
+                            const auto& List = pParentChildren->m_List;
                             if (List.empty())
                             {
-                                std::array<const xecs::component::type::info*, 1> RemoveChildren{ &xecs::component::type::info_v<xecs::component::children> };
-                                MigrateEntityComponents(SceneContext(), SceneGuid, static_cast<xecs::scene::permanent_id>(ParentId), {}, RemoveChildren);
+                                const std::array RemoveChildren{ xlioncore::GuidOf<xecs::component::children>() };
+                                MigrateEntityComponentGuids(SceneContext(), SceneGuid, static_cast<xecs::scene::permanent_id>(ParentId), {}, RemoveChildren);
                             }
                         }
                     }

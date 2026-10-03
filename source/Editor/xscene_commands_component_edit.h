@@ -72,7 +72,21 @@ namespace xscene::commands
     // this entity happens to be the one currently selected in the UI - refresh State so the Entity
     // Properties panel picks up the migration in the same frame instead of showing a stale/dangling
     // handle. Returns the new entity handle (invalid if SceneGuid/Id didn't resolve).
+    inline xecs::component::entity MigrateEntityComponentGuids(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::span<const xecs::component::type::guid> Add, std::span<const xecs::component::type::guid> Sub) noexcept;
+
     inline xecs::component::entity MigrateEntityComponents(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::span<const xecs::component::type::info* const> Add, std::span<const xecs::component::type::info* const> Sub) noexcept
+    {
+        // by guid: the copy of the core the world belongs to finds its own descriptions of the types
+        auto GuidsOf = [](std::span<const xecs::component::type::info* const> Infos) noexcept
+        {
+            std::vector<xecs::component::type::guid> Guids;
+            for (const auto* pInfo : Infos) Guids.push_back(pInfo->m_Guid);
+            return Guids;
+        };
+        return MigrateEntityComponentGuids(Ed, SceneGuid, Id, GuidsOf(Add), GuidsOf(Sub));
+    }
+
+    inline xecs::component::entity MigrateEntityComponentGuids(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::span<const xecs::component::type::guid> Add, std::span<const xecs::component::type::guid> Sub) noexcept
     {
         auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);
         if (!pScene) return {};
@@ -80,7 +94,7 @@ namespace xscene::commands
         if (It == pScene->m_LocalToRuntime.end()) return {};
         const auto OldEntity = It->second;
 
-        const auto NewEntity = Ed.World().AddOrRemoveComponents(OldEntity, Add, Sub);
+        const auto NewEntity = xlioncore::Ecs(Ed.World()).ChangeComponents(OldEntity, Add, Sub);
 
         pScene->m_RuntimeToLocal.erase(OldEntity.m_Value);
         pScene->m_LocalToRuntime[Id]                = NewEntity;
@@ -101,11 +115,9 @@ namespace xscene::commands
     // by remove_component_cmd::BackupCurrenState, BEFORE the component is actually removed.
     inline void SnapshotComponentProperties(scene_context& Ed, xundo::undo_file& File, xecs::component::entity Entity, const xecs::component::type::info& Info) noexcept
     {
-        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Entity);
-        if (!Details.m_pPool) { File.Write(std::uint32_t{ 0 }); return; }
-        const auto iType = Details.m_pPool->findIndexComponentFromInfo(Info);
-        if (iType < 0) { File.Write(std::uint32_t{ 0 }); return; }
-        auto* pInstance = &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * Info.m_Size];
+        const xecs::component::type::info* pFound = nullptr;
+        auto* pInstance = xlioncore::Ecs(Ed.World()).ResolveComponent(Entity, Info.m_Guid, pFound);
+        if (!pInstance) { File.Write(std::uint32_t{ 0 }); return; }
 
         struct snapshot_row { std::string m_Path; std::uint32_t m_TypeGuid; std::string m_ValueStr; };
         std::vector<snapshot_row> Rows;
@@ -273,7 +285,7 @@ namespace xscene::commands
             const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
             const auto CompGuid  = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
 
-            auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ CompGuid });
+            auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "AddComponent: unknown component";
 
             std::array<const xecs::component::type::info*, 1> Add{ pInfo };
@@ -302,7 +314,7 @@ namespace xscene::commands
             std::uint32_t Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
 
-            auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Component });
+            auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ Component });
             if (!pInfo) return;
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
@@ -343,12 +355,12 @@ namespace xscene::commands
             const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
             const auto CompGuid  = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
 
-            auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ CompGuid });
+            auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "RemoveComponent: unknown component";
 
             if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene)
                 if (auto It = pScene->m_LocalToRuntime.find(Id); It != pScene->m_LocalToRuntime.end())
-                    if (auto& Details = World().m_ComponentMgr.getEntityDetails(It->second); Details.m_pPool && !Details.m_pPool->m_pArchetype->getComponentBits().getBit(pInfo->m_BitID))
+                    if (const xecs::component::type::info* pHeld = nullptr; xlioncore::Ecs(World()).IsAlive(It->second) && !xlioncore::Ecs(World()).ResolveComponent(It->second, pInfo->m_Guid, pHeld))
                         return "RemoveComponent: the entity does not have that component";
 
             std::array<const xecs::component::type::info*, 1> Sub{ pInfo };
@@ -379,7 +391,7 @@ namespace xscene::commands
             // removes the component (see set_property_cmd's own comment for the confirmed ordering).
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
             const auto Entity    = ResolveEntityHandle(SceneContext(), SceneGuid, static_cast<xecs::scene::permanent_id>(Id));
-            auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Component });
+            auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ Component });
             if (pInfo && Entity.isValid())
             {
                 SnapshotComponentProperties(SceneContext(), File, Entity, *pInfo);
@@ -400,7 +412,7 @@ namespace xscene::commands
             std::uint32_t Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
 
-            auto* pInfo = World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Component });
+            auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ Component });
             if (!pInfo)
             {
                 // Still have to drain File's own snapshot bytes (zero-length if nothing was written)

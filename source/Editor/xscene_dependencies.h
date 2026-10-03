@@ -1,4 +1,5 @@
 #pragma once
+#include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
 
 // Scene dependency graph helpers: cycle guard, reachability, lost-parent and cross-scene reference handling.
 // Split out of xscene_entity_inspector_bridge.h; included from there at the position this code used to occupy.
@@ -72,21 +73,15 @@ namespace xscene
     template<typename T_FN>
     inline void ForEachLiveEntityReference(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity, T_FN&& Fn) noexcept
     {
-        auto& IDetails = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if (!IDetails.m_pPool) return;
-        auto& Archetype = *IDetails.m_pPool->m_pArchetype;
-        auto  DataSpan  = Archetype.getDataComponentInfos();
+        std::vector<xlioncore::xECSEditor::component_view> Components;
+        xlioncore::Ecs(GameMgr).DataComponentsOf(Entity, Components);
 
         std::vector<xecs::component::entity*> References;
-        for (auto pInfo : DataSpan)
+        for (const auto& [pInfo, pData] : Components)
         {
             if (pInfo->m_ReferenceMode == xecs::component::type::reference_mode::NO_REFERENCES
              || xecs::component::type::IsComponentType<xecs::component::entity>(pInfo))
                 continue;
-
-            const auto iType = IDetails.m_pPool->findIndexComponentFromInfo(*pInfo);
-            if (iType < 0) continue;
-            auto* pData = &IDetails.m_pPool->m_pComponent[iType][IDetails.m_PoolIndex.m_Value * pInfo->m_Size];
 
             if (pInfo->m_ReferenceMode == xecs::component::type::reference_mode::BY_FUNCTION)
             {
@@ -209,21 +204,15 @@ namespace xscene
 
         for (auto& [Id, Entity] : Owner.m_LocalToRuntime)
         {
-            auto& IDetails = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-            if (!IDetails.m_pPool) continue;
-            auto& Archetype = *IDetails.m_pPool->m_pArchetype;
-            auto  DataSpan  = Archetype.getDataComponentInfos();
+            std::vector<xlioncore::xECSEditor::component_view> Components;
+            xlioncore::Ecs(GameMgr).DataComponentsOf(Entity, Components);
 
-            for (auto pInfo : DataSpan)
+            for (const auto& [pInfo, pData] : Components)
             {
                 if (pInfo->m_ReferenceMode == xecs::component::type::reference_mode::NO_REFERENCES
                  || xecs::component::type::IsComponentType<xecs::component::entity>(pInfo)
                  || !pInfo->m_pPropertyTable)
                     continue;
-
-                const auto iType = IDetails.m_pPool->findIndexComponentFromInfo(*pInfo);
-                if (iType < 0) continue;
-                auto* pData = &IDetails.m_pPool->m_pComponent[iType][IDetails.m_PoolIndex.m_Value * pInfo->m_Size];
 
                 xproperty::settings::context Context{};
                 xproperty::sprop::collector(pData, *pInfo->m_pPropertyTable, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
@@ -273,9 +262,9 @@ namespace xscene
     // - no behavior change; see each file's own top comment.
     //---------------------------------------------------------------------------
 
-    // Whether the live component registry knows a component type: what a scene's component dependencies are checked against.
-    inline bool IsComponentInLiveRegistry( xecs::component::type::guid Guid ) noexcept
+    // Whether the registry of the copy of the core a world belongs to knows a component type: what a scene's component dependencies are checked against.
+    inline bool IsComponentInLiveRegistry( xecs::game_mgr::instance& World, xecs::component::type::guid Guid ) noexcept
     {
-        return xecs::component::mgr::findComponentTypeInfo(Guid) != nullptr;
+        return xlioncore::Ecs(World).FindComponentType(Guid) != nullptr;
     }
 }

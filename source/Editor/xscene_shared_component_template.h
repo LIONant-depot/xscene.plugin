@@ -19,28 +19,8 @@ namespace xscene
     //---------------------------------------------------------------------------
     inline void* ResolveComponentPointer(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity, const xecs::component::type::info& Info) noexcept
     {
-        if (Entity.isValid() == false) return nullptr;
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if (Details.m_pPool == nullptr) return nullptr;
-
-        const auto iType = Details.m_pPool->findIndexComponentFromInfo(Info);
-        if (iType >= 0)
-            return &Details.m_pPool->m_pComponent[iType][Details.m_PoolIndex.m_Value * Info.m_Size];
-
-        if (Info.m_TypeID != xecs::component::type::id::SHARE) return nullptr;
-        auto* pFamily = Details.m_pPool->m_pMyFamily;
-        if (pFamily == nullptr) return nullptr;
-
-        for (int i = 0, end = static_cast<int>(pFamily->m_ShareInfos.size()); i < end; ++i)
-        {
-            if (pFamily->m_ShareInfos[i]->m_Guid.m_Value != Info.m_Guid.m_Value) continue;
-            auto& ShareDetails = GameMgr.m_ComponentMgr.getEntityDetails(pFamily->m_ShareDetails[i].m_Entity);
-            if (ShareDetails.m_pPool == nullptr) return nullptr;
-            const auto iShare = ShareDetails.m_pPool->findIndexComponentFromInfo(Info);
-            if (iShare < 0) return nullptr;
-            return &ShareDetails.m_pPool->m_pComponent[iShare][ShareDetails.m_PoolIndex.m_Value * Info.m_Size];
-        }
-        return nullptr;
+        const xecs::component::type::info* pFound = nullptr;
+        return xlioncore::Ecs(GameMgr).ResolveComponent(Entity, Info.m_Guid, pFound);
     }
 
     //---------------------------------------------------------------------------
@@ -91,10 +71,6 @@ namespace xscene
         if (Info.m_TypeID != xecs::component::type::id::SHARE) return false;
         if (Entity.isValid() == false) return false;
 
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if (Details.m_pPool == nullptr || Details.m_pPool->m_pMyFamily == nullptr || Details.m_pPool->m_pArchetype == nullptr)
-            return false;
-
         void* pCurrent = ResolveComponentPointer(GameMgr, Entity, Info);
         if (pCurrent == nullptr) return false;
 
@@ -102,7 +78,7 @@ namespace xscene
         std::memcpy(Temp.data(), pCurrent, Info.m_Size);
         ApplyPropertyValuesToInstance(Temp.data(), Info, Properties);
 
-        return GameMgr.ReinternShareComponent(Entity, Info, Temp.data());
+        return xlioncore::Ecs(GameMgr).ReinternShareComponent(Entity, Info.m_Guid, Temp.data());
     }
 
     //---------------------------------------------------------------------------
@@ -174,7 +150,7 @@ namespace xscene
         xresource::full_guid ParentFolder,
         std::string_view Name) noexcept
     {
-        auto* pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ ComponentTypeGuidValue });
+        auto* pInfo = xlioncore::Ecs(Ed.World()).FindComponentType(xecs::component::type::guid{ ComponentTypeGuidValue });
         if (!pInfo || pInfo->m_TypeID != xecs::component::type::id::SHARE)
         {
             xeditor::NotifyToast("Save as Shared-Component Template: component is not a share type");
@@ -226,7 +202,7 @@ namespace xscene
         xecs::scene::permanent_id Id,
         const xecs::shared_component_template::descriptor& Desc) noexcept
     {
-        auto* pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Desc.m_ComponentTypeGuid });
+        auto* pInfo = xlioncore::Ecs(Ed.World()).FindComponentType(xecs::component::type::guid{ Desc.m_ComponentTypeGuid });
         if (!pInfo || pInfo->m_TypeID != xecs::component::type::id::SHARE)
         {
             xeditor::NotifyToast("SharedComponentTemplate: unknown or non-share component type");
@@ -236,8 +212,7 @@ namespace xscene
         auto Entity = xscene::commands::ResolveEntityHandle(Ed, SceneGuid, Id);
         if (Entity.isValid() == false) return false;
 
-        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Entity);
-        if (Details.m_pPool == nullptr) return false;
+        if (!xlioncore::Ecs(Ed.World()).IsAlive(Entity)) return false;
 
         const bool bAlreadyPresent = ResolveComponentPointer(Ed.World(), Entity, *pInfo) != nullptr;
         if (!bAlreadyPresent)
@@ -317,7 +292,7 @@ namespace xscene
                         {
                             // Route add through AddComponent command when the type isn't present yet,
                             // then apply values. Values themselves are not undo-routed in V1 (noted).
-                            auto* pInfo = Ed.World().m_ComponentMgr.findComponentTypeInfo(xecs::component::type::guid{ Desc.m_ComponentTypeGuid });
+                            auto* pInfo = xlioncore::Ecs(Ed.World()).FindComponentType(xecs::component::type::guid{ Desc.m_ComponentTypeGuid });
                             if (pInfo)
                             {
                                 auto Entity = State.m_SelectedEntity;

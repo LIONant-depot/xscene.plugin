@@ -46,8 +46,8 @@ namespace xscene::commands
     inline xresource::full_guid CreatePrefabFromGroupRootWithAssetGuid(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root, xresource::full_guid ExplicitPrefabAssetGuid) noexcept
     {
         xecs::component::entity OriginalParent;
-        if (auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Root); RD.m_pPool && RD.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::parent>.m_BitID))
-            OriginalParent = RD.m_pPool->getComponent<xecs::component::parent>(RD.m_PoolIndex).m_Value;
+        if (auto* pRootParent = xlioncore::Ecs(GameMgr).ParentOf(Root))
+            OriginalParent = pRootParent->m_Value;
 
         const auto RootId           = Scene.m_RuntimeToLocal.at(Root.m_Value);
         const bool bRootWasSelected = pState && (pState->m_SelectedEntityId == RootId);
@@ -78,24 +78,21 @@ namespace xscene::commands
 
         if (OriginalParent.isValid())
         {
-            std::array Add{ &xecs::component::type::info_v<xecs::component::parent> };
-            NewRoot = GameMgr.AddOrRemoveComponents(NewRoot, Add, {});
-            auto& NRDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewRoot);
-            NRDetails.m_pPool->getComponent<xecs::component::parent>(NRDetails.m_PoolIndex).m_Value = OriginalParent;
+            auto& Ecs = xlioncore::Ecs(GameMgr);
+            NewRoot = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, NewRoot);
+            Ecs.ParentOf(NewRoot)->m_Value = OriginalParent;
 
-            auto& OPDetails = GameMgr.m_ComponentMgr.getEntityDetails(OriginalParent);
-            if (OPDetails.m_pPool && OPDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+            if (auto* pOriginalChildren = Ecs.ChildrenOf(OriginalParent))
             {
-                auto& OPChildren = OPDetails.m_pPool->getComponent<xecs::component::children>(OPDetails.m_PoolIndex).m_List;
+                auto& OPChildren = pOriginalChildren->m_List;
                 for (auto& C : OPChildren)
                     if (C.m_Value == StaleRootValue) { C = NewRoot; break; }
             }
         }
 
-        auto& NewChildDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewRoot);
-        if (NewChildDetails.m_pPool && NewChildDetails.m_pPool->m_pArchetype->getComponentBits().getBit(xecs::component::type::info_v<xecs::component::children>.m_BitID))
+        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
         {
-            auto ChildEntities = NewChildDetails.m_pPool->getComponent<xecs::component::children>(NewChildDetails.m_PoolIndex).m_List;
+            auto ChildEntities = pNewChildren->m_List;
             for (auto Child : ChildEntities)
                 xscene::RegisterInstantiatedSubtree(GameMgr, Scene, SceneGuid, Child);
         }
@@ -316,9 +313,8 @@ namespace xscene::commands
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "MakePrefabVariant: target not found";
             auto Entity = pScene->m_LocalToRuntime.at(Id);
 
-            auto& Details = World().m_ComponentMgr.getEntityDetails(Entity);
-            const auto iType = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-            if (iType < 0) return "MakePrefabVariant: entity is not a prefab instance";
+            auto* pPrefabInstance = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
+            if (!pPrefabInstance) return "MakePrefabVariant: entity is not a prefab instance";
 
             std::string Name = "Prefab";
             if (auto* pName = xscene::FindEntityName(*pScene, Id)) Name = *pName;
@@ -330,7 +326,8 @@ namespace xscene::commands
             if (auto Err = World().m_PrefabMgr.Save(PrefabGuid); Err)
                 return std::format("MakePrefabVariant: {}", Err.getMessage());
 
-            auto& PI = Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+            // the pools may have moved while the prefab was made: resolved again
+            auto& PI = *xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
             PI.m_PrefabInstance = PrefabGuid;
             PI.m_lComponents.clear();
             PI.m_ComponentDiffs.clear();
@@ -359,9 +356,7 @@ namespace xscene::commands
             if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene && pScene->m_LocalToRuntime.contains(static_cast<xecs::scene::permanent_id>(Id)))
             {
                 auto Entity = pScene->m_LocalToRuntime.at(static_cast<xecs::scene::permanent_id>(Id));
-                auto& Details = World().m_ComponentMgr.getEntityDetails(Entity);
-                const auto iType = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-                if (iType >= 0) pOldPI = &Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+                pOldPI = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
             }
 
             File.Write(pOldPI != nullptr);
@@ -465,11 +460,10 @@ namespace xscene::commands
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene || !pScene->m_LocalToRuntime.contains(static_cast<xecs::scene::permanent_id>(Id))) return;
             auto Entity = pScene->m_LocalToRuntime.at(static_cast<xecs::scene::permanent_id>(Id));
-            auto& Details = World().m_ComponentMgr.getEntityDetails(Entity);
-            const auto iType = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-            if (iType < 0) return;
+            auto* pRestored = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
+            if (!pRestored) return;
 
-            auto& PI = Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+            auto& PI = *pRestored;
             PI.m_PrefabInstance = xecs::prefab::guid{ .m_Instance = { OldInstance }, .m_Type = { OldType } };
             PI.m_lComponents    = std::move(OldComponents);
             PI.m_ComponentDiffs = std::move(OldDiffs);
@@ -511,8 +505,7 @@ namespace xscene
         const bool bIsMultiSelect = pState && pState->m_MultiSelectScene == Payload.m_SceneGuid && pState->m_MultiSelectedEntityIds.size() > 1 && pState->m_MultiSelectedEntityIds.contains(Payload.m_Id);
         if (!bIsMultiSelect)
         {
-            auto& SourceDetails = pWorld->m_ComponentMgr.getEntityDetails(SourceIt->second);
-            if (SourceDetails.m_pPool && SourceDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) >= 0)
+            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(*pWorld), SourceIt->second))
             {
                 const auto Cmd = std::format("MakePrefabVariant -Scene {} -Id {} -Library {} -Asset {} -Parent {}"
                     , xscene::commands::FormatSceneGuid(Payload.m_SceneGuid)
