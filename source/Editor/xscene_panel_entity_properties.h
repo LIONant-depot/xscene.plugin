@@ -54,7 +54,11 @@ namespace xscene
             bAny = true;
             ImGui::TextUnformatted(su::SystemName(S));
             if (ImGui::IsItemHovered())
-                xeditor::hint::Text("%s", S.m_bUpdate ? std::format("Update system, runs #{} in the frame", S.m_Order).c_str() : "Notifier system (runs on entity create/destroy/move events)");
+            {
+                const std::string Body = S.m_bUpdate ? std::format("Update system, runs #{} in the frame", S.m_Order) : std::string("Notifier system (runs on entity create/destroy/move events)");
+                const std::string From = xscene::DescribeSource(xscene::SourceOfType(true, S.m_pInfo->m_Guid.m_Value));
+                xeditor::hint::Draw({ .m_Topic = su::SystemName(S), .m_Body = Body, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
+            }
             if (!S.m_bEnabled) { ImGui::SameLine(); ImGui::TextColored(WarnColor, "(disabled in System Registry)"); }
             ImGui::Indent();
             AccessLine(S, su::access::WRITE, WriteColor);
@@ -418,7 +422,9 @@ namespace xscene
                         if (ImGui::IsItemHovered())
                         {
                             const auto Used = xscene::system_usage::UsedBy(xscene::system_usage::AllSystems(GameMgr), pInfo->m_Guid.m_Value);
-                            xeditor::hint::Text("%s (tag component - no properties)\n%s", pLabel, Used.empty() ? "Not used by any system." : ("Used by: " + Used).c_str());
+                            const std::string Body = Used.empty() ? std::string("Tag component - no properties.\nNot used by any system.") : "Tag component - no properties.\nUsed by: " + Used;
+                            const std::string From = xscene::DescribeSource(xscene::SourceOfType(false, pInfo->m_Guid.m_Value));
+                            xeditor::hint::Draw({ .m_Topic = pLabel, .m_Body = Body, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
                         }
                         pDrawList->AddText(ImVec2(Min.x + FramePad.x, Min.y + FramePad.y), ImGui::GetColorU32(ImGuiCol_Text), pLabel);
 

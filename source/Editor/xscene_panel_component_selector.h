@@ -76,7 +76,9 @@ namespace xscene
             }
 
             const char* pName = pInfo->m_pName ? pInfo->m_pName : "";
-            if (bHasSearch && !xeditor::ContainsCaseInsensitive(pName, State.m_ComponentSelectorSearchString))
+            // The search looks at the module's name too: typing "Soccer" finds the components of the SoccerGame module
+            if (bHasSearch && !xeditor::ContainsCaseInsensitive(pName, State.m_ComponentSelectorSearchString)
+                && !xeditor::ContainsCaseInsensitive(xscene::SourceOfType(false, pInfo->m_Guid.m_Value).m_ModuleName.c_str(), State.m_ComponentSelectorSearchString))
                 continue;
 
             std::string Category;
@@ -157,7 +159,11 @@ namespace xscene
                 ImGui::PushID(Comp.m_pInfo->m_pName);
                 const bool bClicked = ImGui::Selectable(Comp.m_pInfo->m_pName);
                 if (ImGui::IsItemHovered())
-                    xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true).c_str());
+                {
+                    const std::string Change = xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true);
+                    const std::string From   = xscene::DescribeSource(xscene::SourceOfType(false, Comp.m_pInfo->m_Guid.m_Value));
+                    xeditor::hint::Draw({ .m_Topic = Comp.m_pInfo->m_pName ? Comp.m_pInfo->m_pName : "?", .m_Body = Change, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
+                }
 
                 // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
                 if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *Comp.m_pInfo, true); !Change.empty())

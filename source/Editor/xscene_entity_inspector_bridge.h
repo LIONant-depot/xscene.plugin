@@ -278,6 +278,27 @@ namespace xscene
                 const float SmallButtonWidth = ImGui::CalcTextSize("S").x
                                              + ImGui::GetStyle().FramePadding.x * 2.0f;
                 const float ShareButtonsWidth = SmallButtonWidth * 2.0f + ButtonGap;
+
+                // Where the component comes from, as a quiet tag left of the buttons: the script module that defines it. Hover says the file; a click opens it (in the module's editor).
+                // Nothing for the engine's own components, and nothing when the row has no room next to the name.
+                const auto Source = xscene::SourceOfType(false, pInfo->m_Guid.m_Value);
+                auto DrawSourceTag = [&](float RightLimitX) noexcept
+                {
+                    if (!Source.m_bKnown || Source.m_Module == 0 || Source.m_ModuleName.empty()) return;
+                    const float W = ImGui::CalcTextSize(Source.m_ModuleName.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+                    const float X = RightLimitX - W - 4.0f;
+                    if (AvailW < 240.0f || X < RowPos.x + 90.0f) return;
+                    ImGui::SetCursorScreenPos(ImVec2(X, RowPos.y));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    const bool bClicked = ImGui::SmallButton((Source.m_ModuleName + "##src").c_str());
+                    ImGui::PopStyleColor();
+                    if (bClicked && xscene::g_OpenTypeSource) xscene::g_OpenTypeSource(Source);
+                    if (ImGui::IsItemHovered())
+                    {
+                        const std::string Body = "Defined in the script module " + Source.m_ModuleName + ", in " + Source.m_File + ".\nClick to open the file.";
+                        xeditor::hint::Draw({ .m_Topic = pInfo->m_pName ? pInfo->m_pName : "?", .m_Body = Body, .m_Detail = Source.m_Path });
+                    }
+                };
                 if (!bIsShare)
                     ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
                 // Borderless/transparent-at-rest, only picking up a background on hover - matches
@@ -309,6 +330,7 @@ namespace xscene
                     ImGui::SetCursorScreenPos(RowPos);
                     ImGui::TextDisabled("%s", pKind);
                     if (pKindTip && ImGui::IsItemHovered()) xeditor::hint::Text("%s", pKindTip);
+                    DrawSourceTag(RowPos.x + AvailW - RightEdgePad - ShareButtonsWidth);
                     ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - RightEdgePad - ShareButtonsWidth, RowPos.y));
                     ImGui::SmallButton("S");
                     if (ImGui::IsItemHovered())
@@ -328,6 +350,11 @@ namespace xscene
                         ImGui::EndDragDropSource();
                     }
                     ImGui::SameLine(0.0f, 4.0f);
+                }
+                if (!bIsShare)
+                {
+                    DrawSourceTag(RowPos.x + AvailW - 20.0f);
+                    ImGui::SetCursorScreenPos(ImVec2(RowPos.x + AvailW - 20.0f, RowPos.y));
                 }
                 if (ImGui::SmallButton("X")) m_pPendingRemoveComponent = pInfo;
                 ImGui::PopStyleVar();
