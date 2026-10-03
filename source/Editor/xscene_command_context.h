@@ -7,6 +7,7 @@
 #include "dependencies/xeditor/include/xeditor/serialize.h"
 #include "dependencies/xLIONCore/src/tags/xlioncore_tags.h"
 #include "dependencies/xLIONCore/src/physics/xlioncore_physics_api.h"
+#include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
 
 namespace xscene::commands
 {
@@ -250,7 +251,7 @@ namespace xscene::commands
         auto It = pScene->m_LocalToRuntime.find(Id);
         if (It == pScene->m_LocalToRuntime.end()) return;
 
-        xlioncore::physics::TeleportDynamicBody(Ed.World(), It->second, Position, Rotation);
+        if (auto* pEcs = xlioncore::EditorOf(Ed.World())) pEcs->TeleportDynamicBody(It->second, Position, Rotation);        // through the xECSEditor of the world's own copy of the core
     }
 }
 
