@@ -362,9 +362,8 @@ namespace xscene
                 if (ImGui::IsItemHovered())
                 {
                     // Which systems stop/start running on this entity if it's removed.
-                    auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(Ed.m_State.m_SelectedEntity);
-                    if (Details.m_pPool)
-                        xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(Ed.World()), Details.m_pPool->m_pArchetype->getComponentBits(), *pInfo, false).c_str());
+                    if (xlioncore::Ecs(Ed.World()).IsAlive(Ed.m_State.m_SelectedEntity))
+                        xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(Ed.World()), xscene::system_usage::SetOf(Ed.World(), Ed.m_State.m_SelectedEntity), *pInfo, false).c_str());
                 }
             };
             Inspector.m_OnComponentHeaderRender.Register(m_OnComponentHeaderRender);

@@ -23,12 +23,12 @@ namespace xscene
     // "Systems (N)" popup - what runs on this entity and what it touches, what doesn't run and why,
     // and what removing each component would change. Same data as DescribeEntity's pipe output.
     //---------------------------------------------------------------------------
-    inline void RenderEntitySystemsPopupContents(xecs::game_mgr::instance& GameMgr, const xecs::pool::instance& Pool) noexcept
+    inline void RenderEntitySystemsPopupContents(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
     {
         namespace su = xscene::system_usage;
         const auto  Systems    = su::AllSystems(GameMgr);
-        const auto& Bits       = Pool.m_pArchetype->getComponentBits();
-        const auto  Components = UserComponents(*Pool.m_pArchetype);
+        const auto  Bits       = su::SetOf(GameMgr, Entity);
+        const auto  Components = UserComponents(xlioncore::Ecs(GameMgr), Entity);
 
         const ImVec4 WriteColor   = ImVec4(1.00f, 0.70f, 0.35f, 1.0f);
         const ImVec4 ReadColor    = ImVec4(0.55f, 0.75f, 1.00f, 1.0f);
@@ -134,30 +134,24 @@ namespace xscene
                 // still walk the OLD archetype's DataSpan (captured before the migration), so the
                 // just-added component silently wouldn't appear until some later, unrelated dirty flag
                 // flip (e.g. reselecting the entity) rebuilt it with fresh data.
-                auto* pDetails = &GameMgr.m_ComponentMgr.getEntityDetails(State.m_SelectedEntity);
-                if (pDetails->m_pPool == nullptr)
+                // Asked of the xECSEditor of the world's copy of the core (not read from the pools): the component types of the selected entity, by kind. RefreshEntityView() asks again after
+                // AddOrRemoveComponents migrates State.m_SelectedEntity to a new handle - without it, adding/removing a component and rebuilding the inspector in the SAME frame would still walk the
+                // OLD archetype's components, so the just-added component silently wouldn't appear until some later, unrelated dirty flag flip rebuilt it with fresh data.
+                auto& Ecs = xlioncore::Ecs(GameMgr);
+                if (!Ecs.IsAlive(State.m_SelectedEntity))
                 {
-                    // Defensive hardening, not a fix for a known-live bug: getEntityDetails succeeding
-                    // (generation matched) with a still-null pool shouldn't happen given the map-
-                    // corruption root cause is fixed and the stricter selection-liveness check
-                    // (DeleteSubtreeByPermanentId, xscene_commands_entity_lifecycle.h) - kept as a second
-                    // line of defense per direct review feedback, same failure class as the crash phase
-                    // 4 hit (a stale/dangling handle a few lines below would otherwise dereference a
-                    // nullptr). Does NOT guard against that assert itself - getEntityDetails asserts
-                    // internally on a generation mismatch before ever returning, so the real fix is
-                    // never reaching this call with a stale handle in the first place.
+                    // Defensive hardening: an entity handle that is valid but has no pool anymore (a stale selection). IsAlive does not guard against the generation assert of getEntityDetails; the real fix
+                    // is never reaching this call with a stale handle (DeleteSubtreeByPermanentId, xscene_commands_entity_lifecycle.h).
                     ImGui::TextDisabled("Select an entity in the Level Editor panel.");
                     ImGui::End();
                     return;
                 }
-                auto* pArchetype = pDetails->m_pPool->m_pArchetype;
-                auto  DataSpan   = pArchetype->getDataComponentInfos();
+                std::vector<const xecs::component::type::info*> DataSpan, ShareInfos, TagInfos;
+                Ecs.ComponentTypesOf(State.m_SelectedEntity, DataSpan, ShareInfos, TagInfos);
 
                 auto RefreshEntityView = [&]() noexcept
                 {
-                    pDetails   = &GameMgr.m_ComponentMgr.getEntityDetails(State.m_SelectedEntity);
-                    pArchetype = pDetails->m_pPool->m_pArchetype;
-                    DataSpan   = pArchetype->getDataComponentInfos();
+                    Ecs.ComponentTypesOf(State.m_SelectedEntity, DataSpan, ShareInfos, TagInfos);
                 };
 
                 // Popup selector (grouped + searchable) â€” replaces the flat BeginCombo list.
@@ -173,7 +167,7 @@ namespace xscene
                     ImGui::SetNextWindowSize(ImVec2(320.0f, 360.0f), ImGuiCond_Appearing);
                     if (ImGui::BeginPopup(kAddComponentPopupId))
                     {
-                        if (xscene::RenderComponentSelectorPopupContents(Ed, pDetails->m_pPool))
+                        if (xscene::RenderComponentSelectorPopupContents(Ed, State.m_SelectedEntity))
                             RefreshEntityView();
                         ImGui::EndPopup();
                     }
@@ -181,7 +175,7 @@ namespace xscene
                     // Which systems run on / modify this entity - the first stop when debugging it.
                     constexpr const char* kSystemsPopupId = "EntitySystemsPopup";
                     const auto  Systems = xscene::system_usage::AllSystems(GameMgr);
-                    const auto& Bits    = pArchetype->getComponentBits();
+                    const auto  Bits    = xscene::system_usage::SetOf(GameMgr, State.m_SelectedEntity);
                     std::vector<xscene::system_usage::system_ref> Running;
                     for (auto& S : Systems) if (xscene::system_usage::Matches(S, Bits)) Running.push_back(S);
 
@@ -195,7 +189,7 @@ namespace xscene
                     ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
                     if (ImGui::BeginPopup(kSystemsPopupId))
                     {
-                        RenderEntitySystemsPopupContents(GameMgr, *pDetails->m_pPool);
+                        RenderEntitySystemsPopupContents(GameMgr, State.m_SelectedEntity);
                         ImGui::EndPopup();
                     }
                 }
@@ -322,18 +316,11 @@ namespace xscene
                     // today without needing to touch their own definitions.
                     std::vector<const xecs::component::type::info*> SortedComponents(DataSpan.begin(), DataSpan.end());
                     // SHARE components (pool family) - shown like data components; Save-as-template button is SHARE-only.
-                    if (pDetails->m_pPool->m_pMyFamily)
-                    {
-                        for (auto* pShareInfo : pDetails->m_pPool->m_pMyFamily->m_ShareInfos)
-                        {
-                            if (pShareInfo == nullptr) continue;
-                            if (std::find(SortedComponents.begin(), SortedComponents.end(), pShareInfo) == SortedComponents.end())
-                                SortedComponents.push_back(pShareInfo);
-                        }
-                    }
-                    // TAG components (e.g. static_tag) are masked out of DataSpan/pool infos - they
-                    // live only in the archetype's component bits.
-                    pArchetype->AppendTagComponentInfos(SortedComponents);
+                    for (auto* pShareInfo : ShareInfos)
+                        if (std::find(SortedComponents.begin(), SortedComponents.end(), pShareInfo) == SortedComponents.end())
+                            SortedComponents.push_back(pShareInfo);
+                    // TAG components (e.g. static_tag) are not data: the core lists them apart.
+                    SortedComponents.insert(SortedComponents.end(), TagInfos.begin(), TagInfos.end());
                     std::erase_if(SortedComponents, [&](const xecs::component::type::info* pInfo) noexcept
                     {
                         if (State.m_ComponentCategoryFilter.empty()) return false;
@@ -439,7 +426,7 @@ namespace xscene
                         if (ImGui::IsItemHovered())
                         {
                             pDrawList->AddRectFilled(XMin, Max, ImGui::GetColorU32(ImVec4(0x55 / 255.0f, 0x55 / 255.0f, 0x75 / 255.0f, 1.0f)), Rounding, ImDrawFlags_RoundCornersRight);
-                            xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(GameMgr), pArchetype->getComponentBits(), *pInfo, false).c_str());
+                            xeditor::hint::Text("%s", xscene::system_usage::DescribeChange(xscene::system_usage::AllSystems(GameMgr), xscene::system_usage::SetOf(GameMgr, State.m_SelectedEntity), *pInfo, false).c_str());
                         }
                         const ImVec2 XTextSize = ImGui::CalcTextSize("x");
                         pDrawList->AddText(ImVec2(XMin.x + (XWidth - XTextSize.x) * 0.5f, Min.y + FramePad.y), ImGui::GetColorU32(ImGuiCol_Text), "x");

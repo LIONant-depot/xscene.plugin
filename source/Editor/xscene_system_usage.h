@@ -11,6 +11,8 @@
 // xecs::system::type::component_access). A system that declares no components (e.g. a logger that
 // never iterates entities) is not an entity system and is left out, otherwise its empty query would
 // "match" every entity.
+#include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
+#include <algorithm>
 #include <format>
 #include <span>
 #include <string>
@@ -20,13 +22,13 @@ namespace xscene
 {
     bool IsInternalComponent(const xecs::component::type::info* pInfo) noexcept;   // xscene_prefab_overrides.h
 
-    // Every user-visible component on an archetype: data, share and tags (internal bookkeeping excluded).
-    inline std::vector<const xecs::component::type::info*> UserComponents(const xecs::archetype::instance& Archetype) noexcept
+    // Every user-visible component of an entity: data, share and tags (internal bookkeeping excluded).
+    inline std::vector<const xecs::component::type::info*> UserComponents(xlioncore::xECSEditor& Ecs, xecs::component::entity Entity) noexcept
     {
-        std::vector<const xecs::component::type::info*> Out;
-        for (auto p : Archetype.getDataComponentInfos())  Out.push_back(p);
-        for (auto p : Archetype.getShareComponentInfos()) Out.push_back(p);
-        Archetype.AppendTagComponentInfos(Out);
+        std::vector<const xecs::component::type::info*> Out, Share, Tags;
+        Ecs.ComponentTypesOf(Entity, Out, Share, Tags);
+        Out.insert(Out.end(), Share.begin(), Share.end());
+        Out.insert(Out.end(), Tags.begin(), Tags.end());
         std::erase_if(Out, [](auto* p) noexcept { return xscene::IsInternalComponent(p); });
         return Out;
     }
@@ -37,13 +39,31 @@ namespace xscene::system_usage
     using access = xecs::system::type::access;
     using match  = xecs::system::type::match;
 
-    struct system_ref
+    using system_ref = xlioncore::system_view;
+
+    // The component types an entity has (every kind, internal ones too), and the copy of the core that says which systems run on them: what the systems are matched against, by guid, so that
+    // nothing here reads a bit id.
+    struct component_set
     {
-        const xecs::system::type::info* m_pInfo     = nullptr;
-        bool                            m_bUpdate   = true;     // false = notifier (runs on create/destroy/move events)
-        bool                            m_bEnabled  = true;
-        int                             m_Order     = -1;       // execution order among update systems
+        xlioncore::xECSEditor*                      m_pEcs = nullptr;
+        std::vector<xecs::component::type::guid>    m_Guids;
+
+        bool Has(std::uint64_t Guid) const noexcept { return std::any_of(m_Guids.begin(), m_Guids.end(), [&](auto G) noexcept { return G.m_Value == Guid; }); }
+        void Add(xecs::component::type::guid G) noexcept { if (!Has(G.m_Value)) m_Guids.push_back(G); }
+        void Remove(xecs::component::type::guid G) noexcept { std::erase_if(m_Guids, [&](auto X) noexcept { return X.m_Value == G.m_Value; }); }
     };
+
+    inline component_set SetOf(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
+    {
+        component_set Out;
+        Out.m_pEcs = &xlioncore::Ecs(GameMgr);
+        std::vector<const xecs::component::type::info*> Data, Share, Tags;
+        Out.m_pEcs->ComponentTypesOf(Entity, Data, Share, Tags);
+        for (auto* p : Data)  Out.m_Guids.push_back(p->m_Guid);
+        for (auto* p : Share) Out.m_Guids.push_back(p->m_Guid);
+        for (auto* p : Tags)  Out.m_Guids.push_back(p->m_Guid);
+        return Out;
+    }
 
     struct change
     {
@@ -80,34 +100,15 @@ namespace xscene::system_usage
 
     inline std::vector<system_ref> AllSystems(xecs::game_mgr::instance& GameMgr, bool bEntitySystemsOnly = true) noexcept
     {
-        auto& Mgr  = GameMgr.m_SystemMgr;
-        auto  Rows = Mgr.GetUpdateSystemRows();   // index-aligned with m_UpdaterSystems
         std::vector<system_ref> Out;
-        for (std::size_t i = 0; i < Mgr.m_UpdaterSystems.size(); ++i)
-        {
-            auto* pInfo = Mgr.m_UpdaterSystems[i].first;
-            if (bEntitySystemsOnly && pInfo->m_Access.empty()) continue;
-            Out.push_back({ pInfo, true, i < Rows.size() ? Rows[i].m_bEnabled : true, static_cast<int>(i) });
-        }
-        for (auto& E : Mgr.m_NotifierSystems)
-        {
-            if (bEntitySystemsOnly && E.first->m_Access.empty()) continue;
-            Out.push_back({ E.first, false, true, -1 });
-        }
+        xlioncore::Ecs(GameMgr).ListSystems(Out, bEntitySystemsOnly);
         return Out;
     }
 
-    // Same Compare overloads the runtime uses: Search (update systems) also checks exclusive tags,
-    // notifier registration (system::mgr::OnNewArchetype) does not.
-    inline bool Matches(const system_ref& S, const xecs::tools::bits& Bits) noexcept
+    // The scheduler's own test (in the copy of the core the set belongs to): update systems also check the exclusive tags, notifiers do not.
+    inline bool Matches(const system_ref& S, const component_set& Set) noexcept
     {
-        if (S.m_bUpdate)
-        {
-            xecs::tools::bits Exclusive;
-            Exclusive.setupAnd(Bits, xecs::component::mgr::s_Registry.m_ExclusiveTagsBits);
-            return S.m_pInfo->m_Query.Compare(Bits, Exclusive);
-        }
-        return S.m_pInfo->m_Query.Compare(Bits);
+        return Set.m_pEcs->SystemMatches(S, Set.m_Guids);
     }
 
     inline const xecs::system::type::component_access* FindAccess(const system_ref& S, std::uint64_t ComponentGuid) noexcept
@@ -117,10 +118,9 @@ namespace xscene::system_usage
         return nullptr;
     }
 
-    inline bool HasComponent(const xecs::tools::bits& Bits, std::uint64_t ComponentGuid) noexcept
+    inline bool HasComponent(const component_set& Set, std::uint64_t ComponentGuid) noexcept
     {
-        auto* pInfo = xecs::component::mgr::findComponentTypeInfo(xecs::component::type::guid{ ComponentGuid });
-        return pInfo && Bits.getBit(pInfo->m_BitID);
+        return Set.Has(ComponentGuid);
     }
 
     // A system's own declaration, one component per line ("must      writes  Transform").
@@ -134,11 +134,11 @@ namespace xscene::system_usage
     }
 
     // What starts/stops running on an entity whose archetype is Before if Info is added (bAdd) or removed.
-    inline change WhatIf(const std::vector<system_ref>& Systems, const xecs::tools::bits& Before, const xecs::component::type::info& Info, bool bAdd) noexcept
+    inline change WhatIf(const std::vector<system_ref>& Systems, const component_set& Before, const xecs::component::type::info& Info, bool bAdd) noexcept
     {
-        xecs::tools::bits After = Before;
-        if (bAdd) After.setBit(Info.m_BitID);
-        else      After.clearBit(Info.m_BitID);
+        component_set After = Before;
+        if (bAdd) After.Add(Info.m_Guid);
+        else      After.Remove(Info.m_Guid);
 
         change Out;
         for (auto& S : Systems)
@@ -152,7 +152,7 @@ namespace xscene::system_usage
     }
 
     // Why S doesn't match Bits, in the system's own declared terms. Empty if it does match.
-    inline std::string WhyNotRunning(const system_ref& S, const xecs::tools::bits& Bits) noexcept
+    inline std::string WhyNotRunning(const system_ref& S, const component_set& Bits) noexcept
     {
         if (Matches(S, Bits)) return {};
         std::string Missing, Blocking, OneOf;
@@ -195,7 +195,7 @@ namespace xscene::system_usage
     }
 
     // Tooltip/CLI text for adding (bAdd) or removing a component on an entity with archetype Bits.
-    inline std::string DescribeChange(const std::vector<system_ref>& Systems, const xecs::tools::bits& Bits, const xecs::component::type::info& Info, bool bAdd) noexcept
+    inline std::string DescribeChange(const std::vector<system_ref>& Systems, const component_set& Bits, const xecs::component::type::info& Info, bool bAdd) noexcept
     {
         const auto  Change = WhatIf(Systems, Bits, Info, bAdd);
         const auto  Used   = UsedBy(Systems, Info.m_Guid.m_Value);
@@ -207,9 +207,9 @@ namespace xscene::system_usage
         return Out;
     }
 
-    // Everything about one entity (Bits = its archetype) - the CLI's DescribeEntity section and the
+    // Everything about one entity (Bits = its component types) - the CLI's DescribeEntity section and the
     // Inspector popup's copyable text.
-    inline std::string DescribeEntitySystems(xecs::game_mgr::instance& GameMgr, const xecs::tools::bits& Bits, std::span<const xecs::component::type::info* const> Components) noexcept
+    inline std::string DescribeEntitySystems(xecs::game_mgr::instance& GameMgr, const component_set& Bits, std::span<const xecs::component::type::info* const> Components) noexcept
     {
         const auto  Systems = AllSystems(GameMgr);
         std::string Out     = "Systems running on this entity:\n";

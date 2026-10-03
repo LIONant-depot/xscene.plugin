@@ -25,11 +25,12 @@ namespace xscene
     // Returns true if a component was added this frame.
     //---------------------------------------------------------------------------
     inline bool RenderComponentSelectorPopupContents(
-        scene_context&        Ed,
-        xecs::pool::instance*  pPool) noexcept
+        scene_context&         Ed,
+        xecs::component::entity Entity) noexcept
     {
         auto& State = Ed.m_State;
-        if (pPool == nullptr)
+        auto& Ecs   = xlioncore::Ecs(Ed.World());
+        if (!Ecs.IsAlive(Entity))
         {
             ImGui::TextDisabled("Select an entity.");
             return false;
@@ -48,12 +49,14 @@ namespace xscene
         };
 
         // Registry (not the entity DataSpan) â€” same source as the old BeginCombo list.
+        const auto Bits = xscene::system_usage::SetOf(Ed.World(), Entity);            // what the entity has already (every kind: data, share, tags)
+        std::vector<const xecs::component::type::info*> Registered;
+        Ecs.ListComponentTypes(Registered);
         std::vector<component_entry> Available;
-        Available.reserve(xecs::component::mgr::s_Registry.m_ComponentInfoMap.size());
+        Available.reserve(Registered.size());
 
-        for (auto& Pair : xecs::component::mgr::s_Registry.m_ComponentInfoMap)
+        for (auto* pInfo : Registered)
         {
-            auto* pInfo = Pair.second;
             // DATA + SHARE (V1 SharedComponentTemplate pipeline: share components are addable like
             // data) + TAG (real zero-storage markers like static_tag - excluding them here predates
             // any tag component existing at all; direct user report: "I do not see any component tag
@@ -62,18 +65,7 @@ namespace xscene
                 && pInfo->m_TypeID != xecs::component::type::id::SHARE
                 && pInfo->m_TypeID != xecs::component::type::id::TAG) continue;
             if (xscene::IsInternalComponent(pInfo)) continue;
-            // findIndexComponentFromInfo, not getComponentBits().getBit() â€” see
-            // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md.
-            if (pPool->findIndexComponentFromInfo(*pInfo) >= 0) continue;
-            // Tags have no pool storage (stripped from the archetype's info array) - presence is bits-only.
-            if (pInfo->m_TypeID == xecs::component::type::id::TAG && pPool->m_pArchetype->getComponentBits().getBit(pInfo->m_BitID)) continue;
-            if (pInfo->m_TypeID == xecs::component::type::id::SHARE && pPool->m_pMyFamily)
-            {
-                bool bHasShare = false;
-                for (auto* pShareInfo : pPool->m_pMyFamily->m_ShareInfos)
-                    if (pShareInfo && pShareInfo->m_Guid.m_Value == pInfo->m_Guid.m_Value) { bHasShare = true; break; }
-                if (bHasShare) continue;
-            }
+            if (Bits.Has(pInfo->m_Guid.m_Value)) continue;
 
             const char* pName = pInfo->m_pName ? pInfo->m_pName : "";
             // The search looks at the module's name too: typing "Soccer" finds the components of the SoccerGame module
@@ -124,7 +116,6 @@ namespace xscene
 
         bool bAdded = false;
         const auto  Systems = xscene::system_usage::AllSystems(Ed.World());
-        const auto& Bits    = pPool->m_pArchetype->getComponentBits();
 
         ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 8.0f);
         ImGui::BeginChild("##ComponentSelectorList", ImVec2(0, 0), ImGuiChildFlags_None);
