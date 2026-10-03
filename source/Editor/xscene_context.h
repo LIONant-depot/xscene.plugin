@@ -15,6 +15,9 @@ namespace xscene
 
         bool m_bEntityInspectorDirty = true;
 
+        // The root of the tree (a Level, for the Level editor) is selected instead of an entity: the Inspector shows the root's own properties. A plain Select ends it.
+        bool m_bRootSelected = false;
+
         // Ctrl-click set, separate from the primary selection above (which alone drives the Properties panel); a plain click
         // clears it. It is scoped to ONE scene at a time, because a prefab's members must all come from the same live scene.
         std::unordered_set<xecs::scene::permanent_id>  m_MultiSelectedEntityIds;

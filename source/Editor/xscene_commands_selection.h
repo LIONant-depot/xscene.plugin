@@ -64,6 +64,7 @@ namespace xscene::commands
             S.m_SelectedEntity         = It->second;
             S.m_SelectedEntityScene    = SceneGuid;
             S.m_bEntityInspectorDirty  = true;
+            S.m_bRootSelected          = false;
             return {};
         }
 
@@ -71,6 +72,26 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override { RestoreSelection(get<scene_context>(), File); }
 
         xcmdline::parser::handle m_hScene, m_hId;
+    };
+
+    //================================================================================================
+    // SelectLevel - selects the root of the tree (the Level): the Inspector shows its properties. The entity selection stays as it was, so a plain Select (or its Undo) brings the entity back.
+    //================================================================================================
+    struct select_level_cmd : scene_command
+    {
+        select_level_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SelectLevel", pDataBase) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Selects the Level (the root of the Level Tree): the Inspector shows the Level's properties, such as its Game. A Select of an entity ends it. Usage: SelectLevel"; }
+        void RegisterArguments() noexcept override {}
+
+        std::string Redo() noexcept override
+        {
+            auto& S = get<scene_context>().m_State;
+            S.m_bRootSelected = true;
+            return {};
+        }
+
+        void BackupCurrenState(xundo::undo_file& File) noexcept override { BackupSelection(get<scene_context>(), File); }
+        void Undo(xundo::undo_file& File) noexcept override { RestoreSelection(get<scene_context>(), File); }
     };
 
     //================================================================================================
@@ -154,6 +175,7 @@ namespace xscene::commands
             S.m_MultiSelectOrder.clear();
             S.m_MultiSelectScene       = {};
             S.m_bEntityInspectorDirty  = true;
+            S.m_bRootSelected          = false;
             return {};
         }
 

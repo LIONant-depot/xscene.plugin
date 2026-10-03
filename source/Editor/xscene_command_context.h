@@ -40,6 +40,7 @@ namespace xscene::commands
         File.Write(static_cast<std::uint32_t>(S.m_MultiSelectOrder.size()));
         for (auto Id : S.m_MultiSelectOrder) File.Write(Id);
         File.Write(S.m_MultiSelectScene);
+        File.Write(S.m_bRootSelected);
     }
 
     inline void RestoreSelection(scene_context& Ctx, xundo::undo_file& File) noexcept
@@ -80,6 +81,7 @@ namespace xscene::commands
         }
 
         File.Read(S.m_MultiSelectScene);
+        File.Read(S.m_bRootSelected);
         S.m_bEntityInspectorDirty = true;
     }
 
