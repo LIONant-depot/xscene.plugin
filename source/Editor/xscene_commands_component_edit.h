@@ -270,7 +270,7 @@ namespace xscene::commands
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
-            m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits", true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
         }
 
         std::string Redo() noexcept override
@@ -283,7 +283,7 @@ namespace xscene::commands
 
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
-            const auto CompGuid  = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            const auto CompGuid  = ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "AddComponent: unknown component";
@@ -301,7 +301,7 @@ namespace xscene::commands
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
             const std::uint32_t Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
-            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             File.Write(Scene);
             File.Write(Id);
@@ -340,7 +340,7 @@ namespace xscene::commands
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
-            m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits", true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
         }
 
         std::string Redo() noexcept override
@@ -353,7 +353,7 @@ namespace xscene::commands
 
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
-            const auto CompGuid  = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            const auto CompGuid  = ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "RemoveComponent: unknown component";
@@ -381,7 +381,7 @@ namespace xscene::commands
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
             const std::uint32_t Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
-            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             File.Write(Scene);
             File.Write(Id);

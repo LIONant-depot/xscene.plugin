@@ -1,4 +1,6 @@
 #pragma once
+#include <cctype>
+#include <algorithm>
 
 // The database the scene commands work on is the scene context; scene_command gives them World(), State() and SceneContext().
 // Also the guid and value formats the scene commands take on the command line.
@@ -147,6 +149,18 @@ namespace xscene::commands
             || GUID == xproperty::settings::var_type<bool>::guid_v
             || GUID == xproperty::settings::var_type<xresource::full_guid>::guid_v
             ;
+    }
+
+    // A component given to a command: its guid in hex (what the lists print) or its name ("Transform", "PhysicsColliderBox"; any case). 0 when it is neither.
+    inline std::uint64_t ParseComponentArg(scene_context& Ed, const std::string& Text) noexcept
+    {
+        const bool bHex = !Text.empty() && Text.size() <= 16 && std::all_of(Text.begin(), Text.end(), [](unsigned char c) noexcept { return std::isxdigit(c) != 0; });
+        if (bHex && Text.size() >= 12) return std::strtoull(Text.c_str(), nullptr, 16);         // a guid (no component is named with twelve hex digits)
+        std::vector<const xecs::component::type::info*> Types;
+        xlioncore::Ecs(Ed.World()).ListComponentTypes(Types);
+        for (const auto* pInfo : Types)
+            if (pInfo->m_pName && _stricmp(pInfo->m_pName, Text.c_str()) == 0) return pInfo->m_Guid.m_Value;
+        return bHex ? std::strtoull(Text.c_str(), nullptr, 16) : 0;
     }
 
     // AnyToString (my_properties.h, shared xproperty lib) asserts(false) on any type outside its own

@@ -252,6 +252,61 @@ namespace xscene::commands
     // before the FIRST one was undone (m_Parser is one shared instance per command TYPE, not per
     // history entry).
     //================================================================================================
+    // The current value of one property as text, and its type guid: what SetProperty needs to say about the value it replaces. False when the path is not a property of the component.
+    inline bool ReadPropertyText(const resolved_property_target& Target, const std::string& Path, std::uint32_t& TypeGuid, std::string& Text) noexcept
+    {
+        if (!Target.m_pInfo || !Target.m_pInstance || !Target.m_pInfo->m_pPropertyTable) return false;
+        bool bFound = false;
+        xproperty::settings::context Context;
+        xproperty::sprop::collector(Target.m_pInstance, *Target.m_pInfo->m_pPropertyTable, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+        {
+            if (bFound || Path != pPropertyName) return;
+            bFound   = true;
+            TypeGuid = Data.m_pType ? Data.m_pType->m_GUID : 0u;
+            std::array<char, 256> Buffer{};
+            const auto Len = FormatPropertyValue(Buffer, Data);
+            Text.assign(Buffer.data(), Len > 0 ? static_cast<std::size_t>(Len) : 0);
+        });
+        return bFound;
+    }
+
+    //================================================================================================
+    // GetProperty - the value of one property, and nothing else (DescribeEntity says every property of every component).
+    //================================================================================================
+    struct get_property_query_cmd : scene_query_command
+    {
+        get_property_query_cmd(xundo::system& System, void* pDataBase) noexcept : scene_query_command(System, "GetProperty", pDataBase) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override
+        {
+            return "Says the value of one property and nothing else. Usage: GetProperty -Scene hexguid -Id hexid -Component name|hex64 -Path property/path";
+        }
+        void RegisterArguments() noexcept override
+        {
+            m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",                       true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",               true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
+            m_hPath      = m_Parser.addOption("Path",      "Property path",                                   true, 1);
+        }
+        std::string Query() noexcept override
+        {
+            auto SceneArg = m_Parser.getOptionArgAs<std::string>(m_hScene, 0);
+            auto IdArg    = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
+            auto CompArg  = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
+            auto PathArg  = m_Parser.getOptionArgAs<std::string>(m_hPath, 0);
+            if (std::holds_alternative<xerr>(SceneArg) || std::holds_alternative<xerr>(IdArg) || std::holds_alternative<xerr>(CompArg) || std::holds_alternative<xerr>(PathArg))
+                return "GetProperty: bad arguments";
+            const auto Comp = ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
+            if (!Comp) return "GetProperty: unknown component";
+            const auto Target = ResolvePropertyTarget(SceneContext(), ParseSceneGuid(std::get<std::string>(SceneArg)), ParseEntityId(std::get<std::string>(IdArg)), Comp);
+            if (!Target.m_pInfo) return "GetProperty: target not found";
+            std::uint32_t TypeGuid = 0;
+            std::string   Text;
+            if (!ReadPropertyText(Target, std::get<std::string>(PathArg), TypeGuid, Text)) return "GetProperty: no such property";
+            return Text;
+        }
+        xcmdline::parser::handle m_hScene, m_hId, m_hComponent, m_hPath;
+    };
+
     struct set_property_cmd : scene_command
     {
         set_property_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "SetProperty", pDataBase) { RegisterArguments(); }
@@ -263,10 +318,10 @@ namespace xscene::commands
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",              true, 1);
             m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",      true, 1);
-            m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits",     true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
             m_hPath      = m_Parser.addOption("Path",      "Property path",                  true, 1);
-            m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits", true, 1);
-            m_hBefore    = m_Parser.addOption("Before",    "Previous value",                 true, 1);
+            m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits (default: the property's own)", false, 1);
+            m_hBefore    = m_Parser.addOption("Before",    "Previous value (default: the current one)",                           false, 1);
             m_hAfter     = m_Parser.addOption("After",     "New value",                      true, 1);
         }
 
@@ -279,18 +334,23 @@ namespace xscene::commands
             auto TypeArg  = m_Parser.getOptionArgAs<std::string>(m_hTypeGuid, 0);
             auto AfterArg = m_Parser.getOptionArgAs<std::string>(m_hAfter, 0);
             if (std::holds_alternative<xerr>(SceneArg) || std::holds_alternative<xerr>(IdArg) || std::holds_alternative<xerr>(CompArg)
-                || std::holds_alternative<xerr>(PathArg) || std::holds_alternative<xerr>(TypeArg) || std::holds_alternative<xerr>(AfterArg))
+                || std::holds_alternative<xerr>(PathArg) || std::holds_alternative<xerr>(AfterArg))
                 return "SetProperty: bad arguments";
 
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id         = ParseEntityId(std::get<std::string>(IdArg));
-            const auto CompGuid   = std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
+            const auto CompGuid   = ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
             const auto Path       = std::get<std::string>(PathArg);
-            const auto TypeGuid   = static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
+            auto       TypeGuid   = std::holds_alternative<xerr>(TypeArg) ? 0u : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
             const auto After      = std::get<std::string>(AfterArg);
 
             const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, Id, CompGuid);
             if (!Target.m_pInfo) return "SetProperty: target not found";
+            if (std::holds_alternative<xerr>(TypeArg))                                   // the type of the property is the editor's to know
+            {
+                std::string CurrentValue;
+                if (!ReadPropertyText(Target, Path, TypeGuid, CurrentValue)) return "SetProperty: no such property";
+            }
 
             SetLivePropertyValue(Target, Path, TypeGuid, After);
             RecordPropertyOverride(SceneContext(), Target, SceneGuid, Id, Path, After);
@@ -324,10 +384,25 @@ namespace xscene::commands
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
             const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
-            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
-            const std::uint32_t TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
+            const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
+            std::uint32_t       TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
             const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
-            const std::string   Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg);
+            std::string         Before    = std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg);
+
+            // What the person did not say, the editor knows: the type of the property and the value it has now (read here, before Redo changes it).
+            if (std::holds_alternative<xerr>(TypeArg) || std::holds_alternative<xerr>(BeforeArg))
+            {
+                const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
+                if (const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, static_cast<xecs::scene::permanent_id>(Id), Component); Target.m_pInfo)
+                {
+                    std::uint32_t Found = 0; std::string Text;
+                    if (ReadPropertyText(Target, Path, Found, Text))
+                    {
+                        if (std::holds_alternative<xerr>(TypeArg))   TypeGuid = Found;
+                        if (std::holds_alternative<xerr>(BeforeArg)) Before   = Text;
+                    }
+                }
+            }
 
             // Resolve the target and record whether an override already exists for THIS Path BEFORE
             // Redo() runs (xundo::system::Execute always calls BackupCurrenState before Redo - see

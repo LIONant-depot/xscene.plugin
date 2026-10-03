@@ -511,7 +511,7 @@ namespace xscene::commands
         create_entity_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "CreateEntity", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Creates a brand-new, bare entity (undoable - deletes it again on Undo). Usage: CreateEntity -Scene hexguid -Id hexid -Folder hexfolder (0 = loose) [-Parent hexid]";
+            return "Creates a brand-new entity, bare or with the components you name (undoable - deletes it again on Undo). Usage: CreateEntity -Scene hexguid -Id hexid -Folder hexfolder (0 = loose) [-Parent hexid] [-Components Transform,Physics,...]";
         }
         void RegisterArguments() noexcept override
         {
@@ -525,6 +525,7 @@ namespace xscene::commands
             // confirmed via direct external review, then verified against the parser's own source
             // before fixing (rather than taking the report at face value).
             m_hParent = m_Parser.addOption("Parent", "Parent entity permanent_id, 8 hex digits, if creating a child", false, 1);
+            m_hComponents = m_Parser.addOption("Components", "Components the new entity starts with: names or type guids, separated by commas", false, 1);
         }
 
         std::string Redo() noexcept override
@@ -545,6 +546,23 @@ namespace xscene::commands
             const auto ParentId = std::holds_alternative<xerr>(ParentArg)
                 ? xecs::scene::invalid_permanent_id_v
                 : ParseEntityId(std::get<std::string>(ParentArg));
+
+            // The components it starts with, named by the person: every one has to be known before anything is made.
+            std::vector<xecs::component::type::guid> StartWith;
+            if (auto ComponentsArg = m_Parser.getOptionArgAs<std::string>(m_hComponents, 0); !std::holds_alternative<xerr>(ComponentsArg))
+            {
+                const std::string List = std::get<std::string>(ComponentsArg);
+                for (std::size_t At = 0; At <= List.size(); )
+                {
+                    const auto End  = List.find(',', At);
+                    const auto Item = List.substr(At, End == std::string::npos ? std::string::npos : End - At);
+                    At = End == std::string::npos ? List.size() + 1 : End + 1;
+                    if (Item.empty()) continue;
+                    const auto Guid = ParseComponentArg(SceneContext(), Item);
+                    if (!Guid) return std::format("CreateEntity: unknown component '{}'", Item);
+                    if (std::find_if(StartWith.begin(), StartWith.end(), [&](auto G) { return G.m_Value == Guid; }) == StartWith.end()) StartWith.push_back(xecs::component::type::guid{ Guid });
+                }
+            }
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene) return "CreateEntity: scene not found";
@@ -593,6 +611,8 @@ namespace xscene::commands
             {
                 xscene::ReparentEntityIntoFolder(*pScene, Id, FolderVal);
             }
+
+            if (!StartWith.empty() && !MigrateEntityComponentGuids(SceneContext(), SceneGuid, Id, StartWith, {}).isValid()) return "CreateEntity: the entity was made but the components could not be added";
 
             State().m_bEntityInspectorDirty = true;
             return {};
@@ -674,7 +694,7 @@ namespace xscene::commands
             }
         }
 
-        xcmdline::parser::handle m_hScene, m_hId, m_hFolder, m_hParent;
+        xcmdline::parser::handle m_hScene, m_hId, m_hFolder, m_hParent, m_hComponents;
     };
 
     //================================================================================================
