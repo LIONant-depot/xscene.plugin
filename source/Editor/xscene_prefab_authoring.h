@@ -46,7 +46,7 @@ namespace xscene
     // instead of always landing loose regardless of where the user actually dropped it.
     void InstantiatePrefabIntoScene(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::prefab::guid PrefabGuid, xecs::scene::folder_id TargetFolder = xecs::scene::invalid_folder_id_v) noexcept
     {
-        if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(PrefabGuid); Err)
+        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PrefabGuid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to load Prefab: {}", Err.getMessage()));
             return;
@@ -59,7 +59,7 @@ namespace xscene
         // back as a real, independent entity here; bRemoveRoot=true (the default) is for splicing a
         // prefab's CHILDREN directly onto a caller-supplied existing entity, discarding the prefab's
         // own root - not what this wants (this needs one standalone instantiated group, root included).
-        auto NewRoot = GameMgr.m_PrefabMgr.CreatePrefabInstance(1, RootIt->second, xecs::tools::empty_lambda{}, /*bRemoveRoot=*/false);
+        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(RootIt->second, /*bRemoveRoot=*/false);
 
         // Registers the whole group (root + every descendant, each under a freshly minted id).
         RegisterInstantiatedSubtree(GameMgr, Scene, Scene.m_Guid, NewRoot);
@@ -289,8 +289,8 @@ namespace xscene
         std::printf("[MakePrefab] CreatePrefabFromGroupRoot: RootId=%u Name='%s' - cloning into prefab\n", RootId, Name.c_str());
         std::fflush(stdout);
 
-        GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Root, PrefabGuid);
-        if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
+        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Root, PrefabGuid);
+        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
@@ -303,7 +303,7 @@ namespace xscene
         // instead (they're new scene entities, never existed as "an instance" before).
         DeleteEntitySubtree(GameMgr, Scene, SceneGuid, Root);
 
-        auto NewRoot = GameMgr.m_PrefabMgr.CreatePrefabInstance(1, GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), xecs::tools::empty_lambda{}, /*bRemoveRoot=*/false);
+        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), /*bRemoveRoot=*/false);
         std::printf("[MakePrefab] CreatePrefabFromGroupRoot: instantiated fresh copy, NewRoot.isValid=%d NewRoot.isZombie=%d\n", NewRoot.isValid(), NewRoot.isZombie());
         std::fflush(stdout);
 
@@ -425,8 +425,8 @@ namespace xscene
         std::printf("[MakePrefab] CreatePrefabVariantFromInstance: Id=%u Name='%s' - capturing into a variant, live entity untouched\n", Id, Name.c_str());
         std::fflush(stdout);
 
-        GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Entity, PrefabGuid);
-        if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
+        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Entity, PrefabGuid);
+        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};

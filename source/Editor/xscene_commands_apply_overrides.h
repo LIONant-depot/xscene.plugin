@@ -100,24 +100,22 @@ namespace xscene::commands
         };
         std::vector<row> Rows;
 
-        if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(PI.m_PrefabInstance); !Err)
+        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PI.m_PrefabInstance); !Err)
         {
             auto RootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(PI.m_PrefabInstance.m_Instance.m_Value);
             if (RootIt != GameMgr.m_PrefabMgr.m_PrefabList.end())
             {
                 for (auto& CompOverride : PI.m_lComponents)
                 {
-                    auto* pOwnerInfo = xecs::component::mgr::findComponentTypeInfo(xecs::component::type::guid{ CompOverride.m_ComponentTypeGuid });
+                    auto* pOwnerInfo = xlioncore::Ecs(GameMgr).FindComponentType(xecs::component::type::guid{ CompOverride.m_ComponentTypeGuid });
                     if (pOwnerInfo == nullptr || pOwnerInfo->m_pPropertyTable == nullptr) continue;
 
-                    const auto PrefabEntity = xecs::persist::details::ResolveMemberPath(GameMgr, RootIt->second, CompOverride.m_MemberPath);
+                    const auto PrefabEntity = xlioncore::Ecs(GameMgr).ResolveMemberPath(RootIt->second, CompOverride.m_MemberPath);
                     if (PrefabEntity.isValid() == false) continue;
 
-                    auto& PDetails = GameMgr.m_ComponentMgr.getEntityDetails(PrefabEntity);
-                    if (PDetails.m_pPool == nullptr) continue;
-                    const auto iPrefType = PDetails.m_pPool->findIndexComponentFromInfo(*pOwnerInfo);
-                    if (iPrefType < 0) continue;
-                    auto* pPrefData = &PDetails.m_pPool->m_pComponent[iPrefType][PDetails.m_PoolIndex.m_Value * pOwnerInfo->m_Size];
+                    const xecs::component::type::info* pPrefInfo = nullptr;
+                    auto* pPrefData = xlioncore::Ecs(GameMgr).ResolveComponent(PrefabEntity, pOwnerInfo->m_Guid, pPrefInfo);
+                    if (pPrefData == nullptr) continue;
 
                     for (auto& PropOverride : CompOverride.m_PropertyOverrides)
                     {
@@ -159,7 +157,7 @@ namespace xscene::commands
     {
         std::uint32_t Count = 0; File.Read(Count);
 
-        if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(PI.m_PrefabInstance); Err)
+        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PI.m_PrefabInstance); Err)
         {
             // Still need to drain the file stream even if restore can't proceed.
             for (std::uint32_t i = 0; i < Count; ++i)
@@ -195,17 +193,15 @@ namespace xscene::commands
             std::uint32_t TypeGuid = 0; File.Read(TypeGuid);
             auto Before = xeditor::ReadString(File);
 
-            auto* pOwnerInfo = xecs::component::mgr::findComponentTypeInfo(xecs::component::type::guid{ CompGuid });
+            auto* pOwnerInfo = xlioncore::Ecs(GameMgr).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (pOwnerInfo == nullptr || pOwnerInfo->m_pPropertyTable == nullptr) continue;
 
-            const auto PrefabEntity = xecs::persist::details::ResolveMemberPath(GameMgr, RootIt->second, MemberPath);
+            const auto PrefabEntity = xlioncore::Ecs(GameMgr).ResolveMemberPath(RootIt->second, MemberPath);
             if (PrefabEntity.isValid() == false) continue;
 
-            auto& PDetails = GameMgr.m_ComponentMgr.getEntityDetails(PrefabEntity);
-            if (PDetails.m_pPool == nullptr) continue;
-            const auto iPrefType = PDetails.m_pPool->findIndexComponentFromInfo(*pOwnerInfo);
-            if (iPrefType < 0) continue;
-            auto* pPrefData = &PDetails.m_pPool->m_pComponent[iPrefType][PDetails.m_PoolIndex.m_Value * pOwnerInfo->m_Size];
+            const xecs::component::type::info* pPrefInfo = nullptr;
+            auto* pPrefData = xlioncore::Ecs(GameMgr).ResolveComponent(PrefabEntity, pOwnerInfo->m_Guid, pPrefInfo);
+            if (pPrefData == nullptr) continue;
 
             xproperty::any Value;
             std::string    ValueStrMutable = Before;
@@ -244,7 +240,7 @@ namespace xscene::commands
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "ApplyOverrides: target not found";
 
             const auto RootEntity = pScene->m_LocalToRuntime.at(Id);
-            if (auto Err = xecs::persist::details::ApplyInstanceOverridesToPrefab(World(), RootEntity); Err)
+            if (auto Err = xlioncore::Ecs(World()).ApplyInstanceOverridesToPrefab(RootEntity); Err)
                 return std::format("ApplyOverrides: {}", Err.getMessage());
 
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
@@ -273,9 +269,8 @@ namespace xscene::commands
             }
 
             const auto RootEntity = pScene->m_LocalToRuntime.at(static_cast<xecs::scene::permanent_id>(Id));
-            auto& Details = World().m_ComponentMgr.getEntityDetails(RootEntity);
-            const auto iPI = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-            if (iPI < 0)
+            auto* pRootPrefabInstance = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), RootEntity);
+            if (pRootPrefabInstance == nullptr)
             {
                 File.Write(std::uint32_t{ 0 });
                 File.Write(std::uint32_t{ 0 });
@@ -283,7 +278,7 @@ namespace xscene::commands
                 return;
             }
 
-            auto& PI = *reinterpret_cast<xecs::editor::prefab_instance*>(&Details.m_pPool->m_pComponent[iPI][Details.m_PoolIndex.m_Value * xecs::component::type::info_v<xecs::editor::prefab_instance>.m_Size]);
+            auto& PI = *pRootPrefabInstance;
             SnapshotAllOverrideBookkeeping(File, PI);
             SnapshotPrefabBeforeValues(File, World(), RootEntity, PI);
         }
@@ -298,11 +293,10 @@ namespace xscene::commands
             if (!pScene || !pScene->m_LocalToRuntime.contains(static_cast<xecs::scene::permanent_id>(Id))) return;
 
             const auto RootEntity = pScene->m_LocalToRuntime.at(static_cast<xecs::scene::permanent_id>(Id));
-            auto& Details = World().m_ComponentMgr.getEntityDetails(RootEntity);
-            const auto iPI = Details.m_pPool ? Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) : -1;
-            if (iPI < 0) return;
+            auto* pRootPrefabInstance = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), RootEntity);
+            if (pRootPrefabInstance == nullptr) return;
 
-            auto& PI = *reinterpret_cast<xecs::editor::prefab_instance*>(&Details.m_pPool->m_pComponent[iPI][Details.m_PoolIndex.m_Value * xecs::component::type::info_v<xecs::editor::prefab_instance>.m_Size]);
+            auto& PI = *pRootPrefabInstance;
 
             // File order: override bookkeeping, then prefab-before values. Restore Prefab first (needs
             // EnsureLoaded), then put the instance's override list back, then re-save the Prefab.
@@ -315,7 +309,7 @@ namespace xscene::commands
 
             PI.m_lComponents    = std::move(TempPI.m_lComponents);
             PI.m_HierarchyDiffs = std::move(TempPI.m_HierarchyDiffs);
-            if (auto Err = World().m_PrefabMgr.Save(PI.m_PrefabInstance); Err)
+            if (auto Err = xlioncore::Ecs(World()).SavePrefab(PI.m_PrefabInstance); Err)
                 xeditor::NotifyToast(std::format("ApplyOverrides Undo: Prefab Save failed: {}", Err.getMessage()));
 
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, static_cast<xecs::scene::permanent_id>(Id));
@@ -355,82 +349,42 @@ namespace xscene::commands
             xecs::component::entity ParentEntity,
             std::uint32_t InsertIndex) noexcept
         {
-            auto& SourceDetails   = GameMgr.m_ComponentMgr.getEntityDetails(Source);
-            if (!SourceDetails.m_pPool) return {};
-            auto& SourceArchetype = *SourceDetails.m_pPool->m_pArchetype;
-            auto  DataSpan        = SourceArchetype.getDataComponentInfos();
+            auto& Ecs = xlioncore::Ecs(GameMgr);
+            if (!Ecs.IsAlive(Source)) return {};
 
-            std::vector<const xecs::component::type::info*> Infos;
-            Infos.push_back(&xecs::component::type::info_v<xecs::component::entity>);
-            for (auto pInfo : DataSpan)
-            {
-                if (xecs::component::type::IsComponentType<xecs::component::entity>(pInfo)) continue;
-                // Nested PI: copy as opaque member (include prefab_instance); still skip rebuilding
-                // its inner children below.
-                Infos.push_back(pInfo);
-            }
-            if (ParentEntity.isValid()
-             && std::find_if(Infos.begin(), Infos.end(), [](auto* p) noexcept {
-                    return xecs::component::type::IsComponentType<xecs::component::parent>(p);
-                }) == Infos.end())
-            {
-                Infos.push_back(&xecs::component::type::info_v<xecs::component::parent>);
-            }
-
-            auto& NewArchetype = GameMgr.getOrCreateArchetype({ Infos.data(), Infos.size() });
-            std::vector<const xecs::component::type::info*> DataInfos;
-            for (auto pInfo : Infos)
-                if (pInfo->m_TypeID != xecs::component::type::id::TAG)
-                    DataInfos.push_back(pInfo);
-            std::vector<std::byte*> MoveData(DataInfos.size(), nullptr);
-            auto NewEntity = NewArchetype.CreateEntity({ DataInfos.data(), DataInfos.size() }, { MoveData.data(), MoveData.size() });
+            // a new entity with the same data components (and a parent component when it goes under one): made inside the copy of the core the world belongs to
+            auto NewEntity = Ecs.CloneEntity(Source, ParentEntity.isValid());
 
             const auto Id = xscene::NextFreeEntityId(Scene);
             Scene.m_LocalToRuntime[Id] = NewEntity;
             Scene.m_RuntimeToLocal[NewEntity.m_Value] = Id;
             GameMgr.m_SceneMgr.MarkEntityNew(SceneGuid, Id);
 
-            auto& NewDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewEntity);
-            auto& NewPool    = *NewDetails.m_pPool;
-            for (auto pInfo : DataSpan)
+            if (ParentEntity.isValid())
             {
-                if (xecs::component::type::IsComponentType<xecs::component::entity>(pInfo)) continue;
-                if (xecs::component::type::IsComponentType<xecs::component::parent>(pInfo)) continue;
-                if (xecs::component::type::IsComponentType<xecs::component::children>(pInfo)) continue;
-                const auto iSrc = SourceDetails.m_pPool->findIndexComponentFromInfo(*pInfo);
-                const auto iDst = NewPool.findIndexComponentFromInfo(*pInfo);
-                if (iSrc < 0 || iDst < 0) continue;
-                auto* pSrc = &SourceDetails.m_pPool->m_pComponent[iSrc][SourceDetails.m_PoolIndex.m_Value * pInfo->m_Size];
-                auto* pDst = &NewPool.m_pComponent[iDst][NewDetails.m_PoolIndex.m_Value * pInfo->m_Size];
-                if (pInfo->m_pCopyFn) pInfo->m_pCopyFn(pDst, pSrc);
-                else std::memcpy(pDst, pSrc, pInfo->m_Size);
-            }
-
-            if (ParentEntity.isValid()
-             && NewPool.findIndexComponentFromInfo(xecs::component::type::info_v<xecs::component::parent>) >= 0)
-            {
-                NewPool.getComponent<xecs::component::parent>(NewDetails.m_PoolIndex).m_Value = ParentEntity;
-                auto& PDetails = GameMgr.m_ComponentMgr.getEntityDetails(ParentEntity);
-                if (PDetails.m_pPool
-                 && PDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::component::children>) >= 0)
+                if (auto* pNewParent = Ecs.ParentOf(NewEntity))
                 {
-                    auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
-                    if (InsertIndex <= List.size())
-                        List.insert(List.begin() + static_cast<std::ptrdiff_t>(InsertIndex), NewEntity);
-                    else
-                        List.push_back(NewEntity);
+                    pNewParent->m_Value = ParentEntity;
+                    if (auto* pParentChildren = Ecs.ChildrenOf(ParentEntity))
+                    {
+                        auto& List = pParentChildren->m_List;
+                        if (InsertIndex <= List.size())
+                            List.insert(List.begin() + static_cast<std::ptrdiff_t>(InsertIndex), NewEntity);
+                        else
+                            List.push_back(NewEntity);
+                    }
+                    if (auto It = Scene.m_RuntimeToLocal.find(ParentEntity.m_Value); It != Scene.m_RuntimeToLocal.end())
+                        GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, It->second);
                 }
-                if (auto It = Scene.m_RuntimeToLocal.find(ParentEntity.m_Value); It != Scene.m_RuntimeToLocal.end())
-                    GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, It->second);
             }
 
             // Opaque nested prefab instance: do not recurse.
-            if (SourceDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) >= 0)
+            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, Source))
                 return NewEntity;
 
-            if (SourceDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::component::children>) >= 0)
+            if (auto* pSourceChildren = Ecs.ChildrenOf(Source))
             {
-                auto ChildList = SourceDetails.m_pPool->getComponent<xecs::component::children>(SourceDetails.m_PoolIndex).m_List;
+                auto ChildList = pSourceChildren->m_List;
                 std::uint32_t i = 0;
                 for (auto Child : ChildList)
                 {
@@ -458,7 +412,7 @@ namespace xscene::commands
             if (!pPI) return "RevertHierarchyOverrides: not a prefab instance";
             if (pPI->m_HierarchyDiffs.empty()) return {};
 
-            if (auto Err = World().m_PrefabMgr.EnsureLoaded(pPI->m_PrefabInstance); Err)
+            if (auto Err = xlioncore::Ecs(World()).EnsureLoadedPrefab(pPI->m_PrefabInstance); Err)
                 return std::format("RevertHierarchyOverrides: {}", Err.getMessage());
             auto RootIt = World().m_PrefabMgr.m_PrefabList.find(pPI->m_PrefabInstance.m_Instance.m_Value);
             if (RootIt == World().m_PrefabMgr.m_PrefabList.end())
@@ -475,7 +429,7 @@ namespace xscene::commands
             });
             for (auto& Path : Added)
             {
-                const auto Target = xecs::persist::details::ResolveMemberPath(World(), RootEntity, Path);
+                const auto Target = xlioncore::Ecs(World()).ResolveMemberPath(RootEntity, Path);
                 if (!Target.isValid()) continue;
                 if (auto It = pScene->m_RuntimeToLocal.find(Target.m_Value); It != pScene->m_RuntimeToLocal.end())
                     xscene::DeleteEntitySubtree(World(), *pScene, SceneGuid, Target, /*bRecordPrefabOverride*/ true);
@@ -490,13 +444,13 @@ namespace xscene::commands
             });
             for (auto& Path : Removed)
             {
-                const auto PrefabSrc = xecs::persist::details::ResolveMemberPath(World(), RootIt->second, Path);
+                const auto PrefabSrc = xlioncore::Ecs(World()).ResolveMemberPath(RootIt->second, Path);
                 if (!PrefabSrc.isValid()) continue;
                 const auto InsertIndex = Path.back();
                 std::vector<std::uint32_t> ParentPath(Path.begin(), Path.end() - 1);
                 const auto InstParent = ParentPath.empty()
                     ? RootEntity
-                    : xecs::persist::details::ResolveMemberPath(World(), RootEntity, ParentPath);
+                    : xlioncore::Ecs(World()).ResolveMemberPath(RootEntity, ParentPath);
                 if (!InstParent.isValid()) continue;
                 ClonePrefabEntityIntoScene(World(), *pScene, SceneGuid, PrefabSrc, InstParent, InsertIndex);
             }
@@ -541,7 +495,7 @@ namespace xscene::commands
             for (auto& D : pPI->m_HierarchyDiffs)
             {
                 if (!D.m_bAdded || D.m_MemberPath.empty()) continue;
-                const auto Target = xecs::persist::details::ResolveMemberPath(World(), RootEntity, D.m_MemberPath);
+                const auto Target = xlioncore::Ecs(World()).ResolveMemberPath(RootEntity, D.m_MemberPath);
                 if (!Target.isValid()) continue;
                 if (auto It = pScene->m_RuntimeToLocal.find(Target.m_Value); It != pScene->m_RuntimeToLocal.end())
                     AddedIds.push_back(It->second);
@@ -589,7 +543,7 @@ namespace xscene::commands
             });
             for (auto& Path : ToDelete)
             {
-                const auto Target = xecs::persist::details::ResolveMemberPath(World(), RootEntity, Path);
+                const auto Target = xlioncore::Ecs(World()).ResolveMemberPath(RootEntity, Path);
                 if (!Target.isValid()) continue;
                 xscene::DeleteEntitySubtree(World(), *pScene, SceneGuid, Target, /*bRecordPrefabOverride*/ false);
             }
@@ -624,9 +578,9 @@ namespace xscene::commands
         static const xecs::component::type::info* FindTransformInfo(
             xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
         {
-            auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-            if (!RD.m_pPool || !RD.m_pPool->m_pArchetype) return nullptr;
-            for (auto* pInfo : RD.m_pPool->m_pArchetype->getDataComponentInfos())
+            std::vector<xlioncore::xECSEditor::component_view> Components;
+            xlioncore::Ecs(GameMgr).DataComponentsOf(Entity, Components);
+            for (const auto& [pInfo, pData] : Components)
             {
                 if (pInfo && pInfo->m_pName && std::strcmp(pInfo->m_pName, "Transform") == 0)
                     return pInfo;
@@ -638,11 +592,10 @@ namespace xscene::commands
             const xecs::component::type::info* pInfo, root_transform_snapshot& Out) noexcept
         {
             if (!pInfo || pInfo->m_Size != sizeof(root_transform_snapshot)) return false;
-            auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-            if (!RD.m_pPool) return false;
-            const int Idx = RD.m_pPool->findIndexComponentFromInfo(*pInfo);
-            if (Idx < 0) return false;
-            std::memcpy(&Out, &RD.m_pPool->m_pComponent[Idx][RD.m_PoolIndex.m_Value * pInfo->m_Size], sizeof(Out));
+            const xecs::component::type::info* pFound = nullptr;
+            auto* pData = xlioncore::Ecs(GameMgr).ResolveComponent(Entity, pInfo->m_Guid, pFound);
+            if (!pData) return false;
+            std::memcpy(&Out, pData, sizeof(Out));
             return true;
         }
 
@@ -651,21 +604,19 @@ namespace xscene::commands
             const xecs::component::type::info* pInfo, const root_transform_snapshot& In) noexcept
         {
             if (!pInfo || pInfo->m_Size != sizeof(root_transform_snapshot)) return;
-            auto& RD = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-            int Idx = RD.m_pPool ? RD.m_pPool->findIndexComponentFromInfo(*pInfo) : -1;
-            if (Idx < 0)
+            auto& Ecs = xlioncore::Ecs(GameMgr);
+            const xecs::component::type::info* pFound = nullptr;
+            auto* pData = Ecs.ResolveComponent(Entity, pInfo->m_Guid, pFound);
+            if (!pData)
             {
-                std::array Add{ pInfo };
-                Entity = GameMgr.AddOrRemoveComponents(Entity, Add, {});
+                const std::array Add{ pInfo->m_Guid };
+                Entity = Ecs.AddComponents(Entity, Add);
                 Scene.m_LocalToRuntime[Id] = Entity;
                 Scene.m_RuntimeToLocal[Entity.m_Value] = Id;
-                auto& RD2 = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-                Idx = RD2.m_pPool->findIndexComponentFromInfo(*pInfo);
-                if (Idx < 0) return;
-                std::memcpy(&RD2.m_pPool->m_pComponent[Idx][RD2.m_PoolIndex.m_Value * pInfo->m_Size], &In, sizeof(In));
-                return;
+                pData = Ecs.ResolveComponent(Entity, pInfo->m_Guid, pFound);
+                if (!pData) return;
             }
-            std::memcpy(&RD.m_pPool->m_pComponent[Idx][RD.m_PoolIndex.m_Value * pInfo->m_Size], &In, sizeof(In));
+            std::memcpy(pData, &In, sizeof(In));
         }
 
         revert_all_overrides_cmd(xundo::system& System, void* pDataBase) noexcept
@@ -704,7 +655,7 @@ namespace xscene::commands
             if (!pPI) return "RevertAllOverrides: entity is not a prefab instance root";
 
             const auto PrefabGuid = pPI->m_PrefabInstance;
-            if (auto Err = World().m_PrefabMgr.EnsureLoaded(PrefabGuid); Err)
+            if (auto Err = xlioncore::Ecs(World()).EnsureLoadedPrefab(PrefabGuid); Err)
                 return std::format("RevertAllOverrides: {}", Err.getMessage());
 
             auto PrefabIt = World().m_PrefabMgr.m_PrefabList.find(PrefabGuid.m_Instance.m_Value);
@@ -712,12 +663,8 @@ namespace xscene::commands
                 return "RevertAllOverrides: prefab root not resident";
 
             xecs::component::entity OriginalParent{};
-            {
-                auto& RD = World().m_ComponentMgr.getEntityDetails(Root);
-                if (RD.m_pPool && RD.m_pPool->m_pArchetype->getComponentBits().getBit(
-                        xecs::component::type::info_v<xecs::component::parent>.m_BitID))
-                    OriginalParent = RD.m_pPool->getComponent<xecs::component::parent>(RD.m_PoolIndex).m_Value;
-            }
+            if (auto* pRootParent = xlioncore::Ecs(World()).ParentOf(Root))
+                OriginalParent = pRootParent->m_Value;
             const auto* pXformInfo = FindTransformInfo(World(), Root);
             root_transform_snapshot SavedXform{};
             const bool bHasTransform = ReadTransform(World(), Root, pXformInfo, SavedXform);
@@ -730,33 +677,26 @@ namespace xscene::commands
             // Rebuild: wipe live instance (no HierarchyDiff bookkeeping — we own the PI root).
             xscene::DeleteEntitySubtree(World(), *pScene, SceneGuid, Root, /*bRecordPrefabOverride*/ false);
 
-            auto NewRoot = World().m_PrefabMgr.CreatePrefabInstance(
-                1, PrefabIt->second, xecs::tools::empty_lambda{}, /*bRemoveRoot=*/false);
+            auto NewRoot = xlioncore::Ecs(World()).CreatePrefabInstance(PrefabIt->second, /*bRemoveRoot=*/false);
 
             if (OriginalParent.isValid())
             {
-                std::array Add{ &xecs::component::type::info_v<xecs::component::parent> };
-                NewRoot = World().AddOrRemoveComponents(NewRoot, Add, {});
-                auto& NRDetails = World().m_ComponentMgr.getEntityDetails(NewRoot);
-                NRDetails.m_pPool->getComponent<xecs::component::parent>(NRDetails.m_PoolIndex).m_Value = OriginalParent;
+                auto& Ecs = xlioncore::Ecs(World());
+                NewRoot = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, NewRoot);
+                Ecs.ParentOf(NewRoot)->m_Value = OriginalParent;
 
-                auto& OPDetails = World().m_ComponentMgr.getEntityDetails(OriginalParent);
-                if (OPDetails.m_pPool && OPDetails.m_pPool->m_pArchetype->getComponentBits().getBit(
-                        xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                if (auto* pOriginalChildren = Ecs.ChildrenOf(OriginalParent))
                 {
-                    auto& OPChildren = OPDetails.m_pPool->getComponent<xecs::component::children>(OPDetails.m_PoolIndex).m_List;
+                    auto& OPChildren = pOriginalChildren->m_List;
                     for (auto& C : OPChildren)
                         if (C.m_Value == StaleRootValue) { C = NewRoot; break; }
                 }
             }
 
             {
-                auto& NewChildDetails = World().m_ComponentMgr.getEntityDetails(NewRoot);
-                if (NewChildDetails.m_pPool && NewChildDetails.m_pPool->m_pArchetype->getComponentBits().getBit(
-                        xecs::component::type::info_v<xecs::component::children>.m_BitID))
+                if (auto* pNewChildren = xlioncore::Ecs(World()).ChildrenOf(NewRoot))
                 {
-                    auto ChildEntities = NewChildDetails.m_pPool->getComponent<xecs::component::children>(
-                        NewChildDetails.m_PoolIndex).m_List;
+                    auto ChildEntities = pNewChildren->m_List;
                     for (auto Child : ChildEntities)
                         xscene::RegisterInstantiatedSubtree(World(), *pScene, SceneGuid, Child);
                 }

@@ -201,26 +201,13 @@ namespace xscene::commands
         if (It == pScene->m_LocalToRuntime.end()) return;
         const auto OldEntity = It->second;
 
-        // info_v<xlioncore::static_tag> is a per-BINARY compile-time singleton (xecs_component_type.h's
-        // own comment) - this file compiles into xscene.plugin/xLION.exe, a DIFFERENT binary than
-        // xLIONCore.dll, where static_tag is actually registered. Raw .m_BitID off this binary's own
-        // copy is safe to read directly here (no per-call registry lookup needed) because
-        // xlevel_session.h's RegisterHostSystems calls SyncLocalBitIDs<xlioncore::static_tag,
-        // xlioncore::transform>() once, right after Lock, specifically so this binary's copies of
-        // these two cross-referenced types stay correct - see that call site's own comment for the
-        // full story (this used to resolve through findComponentTypeInfo every call instead, before
-        // that root-cause fix landed).
-        auto* pStaticTagInfo = &xecs::component::type::info_v<xlioncore::static_tag>;
+        // static_tag is a tag: no pool storage, only a bit of the entity's archetype, so presence is asked of the xECSEditor (the copy of the core the world belongs to), never read from a bit id of this binary.
+        auto& Ecs = xlioncore::Ecs(Ed.World());
+        const auto StaticTag = xlioncore::GuidOf<xlioncore::static_tag>();
+        if (!Ecs.HasComponent(OldEntity, StaticTag)) return;
 
-        auto& Details = Ed.World().m_ComponentMgr.getEntityDetails(OldEntity);
-        if (!Details.m_pPool) return;
-        // Tags have no pool storage - findIndexComponentFromInfo is always -1 for one (see
-        // xecs_tag_components_bits_only, the same lesson static_tag's own Inspector-chip and Add
-        // Component checks already had to learn tonight). Presence is archetype bits only.
-        if (!Details.m_pPool->m_pArchetype->getComponentBits().getBit(pStaticTagInfo->m_BitID)) return;
-
-        std::array<const xecs::component::type::info*, 1> Sub{ pStaticTagInfo };
-        const auto NewEntity = Ed.World().AddOrRemoveComponents(OldEntity, std::span<const xecs::component::type::info* const>{}, std::span<const xecs::component::type::info* const>{ Sub });
+        const std::array Sub{ StaticTag };
+        const auto NewEntity = Ecs.RemoveComponents(OldEntity, Sub);
 
         pScene->m_RuntimeToLocal.erase(OldEntity.m_Value);
         pScene->m_LocalToRuntime[Id]                = NewEntity;

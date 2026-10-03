@@ -15,14 +15,7 @@ namespace xscene
     xecs::editor::prefab_instance* FindPrefabInstance(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
     {
         if (Entity.isValid() == false) return nullptr;
-        auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if (Details.m_pPool == nullptr) return nullptr;
-        // findIndexComponentFromInfo, not getComponentBits().getBit() - see
-        // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md (a runtime-assigned component bit checked this
-        // way can read as absent/invalid even when the component is genuinely present).
-        if (Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) < 0)
-            return nullptr;
-        return &Details.m_pPool->getComponent<xecs::editor::prefab_instance>(Details.m_PoolIndex);
+        return xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(GameMgr), Entity);
     }
 
     // Result of walking UP from some entity to find the prefab instance it's structurally part of -
@@ -55,20 +48,17 @@ namespace xscene
                 return Ctx;
             }
 
-            auto& Details = GameMgr.m_ComponentMgr.getEntityDetails(Cur);
-            if (Details.m_pPool == nullptr) return {};
-            const auto iParentType = Details.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::component::parent>);
-            if (iParentType < 0) return {};   // no parent, and not a PI itself - not part of any instance
+            auto& Ecs = xlioncore::Ecs(GameMgr);
+            auto* pParent = Ecs.ParentOf(Cur);
+            if (pParent == nullptr) return {};   // no parent, and not a PI itself - not part of any instance
 
-            const auto ParentEntity = Details.m_pPool->getComponent<xecs::component::parent>(Details.m_PoolIndex).m_Value;
+            const auto ParentEntity = pParent->m_Value;
             if (ParentEntity.isValid() == false) return {};
 
-            auto& PDetails = GameMgr.m_ComponentMgr.getEntityDetails(ParentEntity);
-            if (PDetails.m_pPool == nullptr) return {};
-            const auto iChildrenType = PDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::component::children>);
-            if (iChildrenType < 0) return {};
+            auto* pParentChildren = Ecs.ChildrenOf(ParentEntity);
+            if (pParentChildren == nullptr) return {};
 
-            auto& List = PDetails.m_pPool->getComponent<xecs::component::children>(PDetails.m_PoolIndex).m_List;
+            auto& List = pParentChildren->m_List;
             auto  It    = std::find_if(List.begin(), List.end(), [&](auto& E) noexcept { return E.m_Value == Cur.m_Value; });
             if (It == List.end()) return {};
 
@@ -302,10 +292,10 @@ namespace xscene
         // and the next save. Checked via findIndexComponentFromInfo (matches the per-component lookup
         // SaveGroupMember/LoadGroupMember already use), not getComponentBits().getBit() - see
         // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md.
-        auto& ExistingDetails = GameMgr.m_ComponentMgr.getEntityDetails(Entity);
-        if( ExistingDetails.m_pPool && ExistingDetails.m_pPool->findIndexComponentFromInfo(xecs::component::type::info_v<xecs::editor::prefab_instance>) >= 0 )
+        auto& Ecs = xlioncore::Ecs(GameMgr);
+        if( auto* pExistingPI = xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, Entity) )
         {
-            auto& PI = ExistingDetails.m_pPool->getComponent<xecs::editor::prefab_instance>(ExistingDetails.m_PoolIndex);
+            auto& PI = *pExistingPI;
             PI.m_PrefabInstance = PrefabGuid;
             PI.m_lComponents.clear();
             PI.m_ComponentDiffs.clear();
@@ -313,10 +303,8 @@ namespace xscene
         }
         else
         {
-            std::array Add{ &xecs::component::type::info_v<xecs::editor::prefab_instance> };
-            NewEntity = GameMgr.AddOrRemoveComponents(Entity, Add, {});
-            auto& NewDetails = GameMgr.m_ComponentMgr.getEntityDetails(NewEntity);
-            NewDetails.m_pPool->getComponent<xecs::editor::prefab_instance>(NewDetails.m_PoolIndex).m_PrefabInstance = PrefabGuid;
+            NewEntity = xlioncore::AddComponentsOf<xecs::editor::prefab_instance>(Ecs, Entity);
+            xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, NewEntity)->m_PrefabInstance = PrefabGuid;
         }
 
         Scene.m_RuntimeToLocal.erase(Entity.m_Value);

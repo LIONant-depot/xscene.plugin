@@ -185,7 +185,7 @@ namespace xscene
                 auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, State.m_SelectedEntity);
                 if (Ctx.m_pPI == nullptr) return;
 
-                if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(Ctx.m_pPI->m_PrefabInstance); Err)
+                if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(Ctx.m_pPI->m_PrefabInstance); Err)
                 {
                     xeditor::NotifyToast(std::format("Failed to load source prefab for revert: {}", Err.getMessage()));
                     return;
@@ -197,7 +197,7 @@ namespace xscene
                 // Same MemberPath, walked from the PREFAB's own root instead of the placed instance's
                 // root - reaches the corresponding source member (see
                 // prefab_component_override::m_MemberPath).
-                const auto BaseEntity = xecs::persist::details::ResolveMemberPath(GameMgr, RootIt->second, Ctx.m_MemberPath);
+                const auto BaseEntity = xlioncore::Ecs(GameMgr).ResolveMemberPath(RootIt->second, Ctx.m_MemberPath);
                 if (BaseEntity.isValid() == false) return;
 
                 // DATA components live in the entity's own pool row, SHARE components on the family's share

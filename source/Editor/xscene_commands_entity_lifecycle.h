@@ -320,7 +320,7 @@ namespace xscene::commands
             const auto RealId = RtIt->second;
 
             const auto ShadowId = xscene::NextFreeEntityId(*pScene);
-            Ed.World().m_SceneMgr.SaveEntity(SceneGuid, ShadowId, Entity);
+            xlioncore::Ecs(Ed.World()).SaveSceneEntity(SceneGuid, ShadowId, Entity);
 
             // SaveEntity itself unconditionally re-registers Scene.m_LocalToRuntime[Id]/
             // m_RuntimeToLocal[Entity.m_Value] using WHATEVER Id it was called with (xecs_scene_
@@ -402,7 +402,7 @@ namespace xscene::commands
         std::vector<xecs::component::entity> Restored;
         for (auto& E : Entries)
         {
-            if (auto Err = xecs::scene::details::LoadEntity(Ed.World().m_SceneMgr, *pScene, E.m_ShadowId); Err)
+            if (auto Err = xlioncore::Ecs(Ed.World()).LoadSceneEntity(*pScene, E.m_ShadowId); Err)
                 continue; // a single corrupted/missing snapshot must not take the whole subtree down
 
             auto ShadowIt = pScene->m_LocalToRuntime.find(E.m_ShadowId);
@@ -427,7 +427,7 @@ namespace xscene::commands
         // m_ExternalToRuntime for a cross-scene target rather than rebuilding it.
         for (auto Entity : Restored)
         {
-            xecs::persist::details::RemapLoadedEntityReferences(Ed.World(), Entity, [&](std::int64_t Encoded) noexcept -> xecs::component::entity
+            xlioncore::Ecs(Ed.World()).RemapLoadedEntityReferences(Entity, [&](std::int64_t Encoded) noexcept -> xecs::component::entity
             {
                 if (Encoded == 0) return {};
                 if (Encoded > 0)
@@ -446,7 +446,7 @@ namespace xscene::commands
         for (auto Entity : Restored)
         {
             if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(Ed.World()), Entity))
-                xecs::persist::details::ApplyPrefabInstancePropertyOverrides(Ed.World(), Entity);
+                xlioncore::Ecs(Ed.World()).ApplyPrefabInstancePropertyOverrides(Entity);
         }
 
         // Root-only, matching SnapshotSubtreeForRestore's own root-only capture. ReparentEntityIntoFolder
@@ -552,8 +552,7 @@ namespace xscene::commands
             if (ParentId != xecs::scene::invalid_permanent_id_v && !pScene->m_LocalToRuntime.contains(ParentId))
                 return "CreateEntity: parent not found";
 
-            auto& Archetype = World().getOrCreateArchetype<>();
-            auto  Entity    = Archetype.CreateEntity(xecs::tools::empty_lambda{});
+            auto Entity = xlioncore::CreateEntityOf<>(xlioncore::Ecs(World()));       // an entity with no component of its own, made inside the copy of the core the world belongs to
             pScene->m_LocalToRuntime[Id]              = Entity;
             pScene->m_RuntimeToLocal[Entity.m_Value]  = Id;
             World().m_SceneMgr.MarkEntityNew(SceneGuid, Id);

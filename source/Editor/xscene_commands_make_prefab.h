@@ -65,8 +65,8 @@ namespace xscene::commands
         xresource_editor::commands::CreateOrRestoreAsset(LibraryGUID, ExplicitPrefabAssetGuid, ParentGUID, Name);
         const xecs::prefab::guid PrefabGuid = ExplicitPrefabAssetGuid;
 
-        GameMgr.m_PrefabMgr.CreatePrefabFromEntity(Root, PrefabGuid);
-        if (auto Err = GameMgr.m_PrefabMgr.Save(PrefabGuid); Err)
+        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Root, PrefabGuid);
+        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
@@ -74,7 +74,7 @@ namespace xscene::commands
 
         xscene::DeleteEntitySubtree(GameMgr, Scene, SceneGuid, Root);
 
-        auto NewRoot = GameMgr.m_PrefabMgr.CreatePrefabInstance(1, GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), xecs::tools::empty_lambda{}, /*bRemoveRoot=*/false);
+        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), /*bRemoveRoot=*/false);
 
         if (OriginalParent.isValid())
         {
@@ -322,8 +322,8 @@ namespace xscene::commands
             xresource_editor::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentGuid, Name);
             const xecs::prefab::guid PrefabGuid = AssetGuid;
 
-            World().m_PrefabMgr.CreatePrefabFromEntity(Entity, PrefabGuid);
-            if (auto Err = World().m_PrefabMgr.Save(PrefabGuid); Err)
+            xlioncore::Ecs(World()).CreatePrefabFromEntity(Entity, PrefabGuid);
+            if (auto Err = xlioncore::Ecs(World()).SavePrefab(PrefabGuid); Err)
                 return std::format("MakePrefabVariant: {}", Err.getMessage());
 
             // the pools may have moved while the prefab was made: resolved again

@@ -245,7 +245,7 @@ namespace xscene
         if (std::find(State.m_OpenScenes.begin(), State.m_OpenScenes.end(), Guid) != State.m_OpenScenes.end())
             return;
 
-        if (auto Err = GameMgr.m_SceneMgr.RequestLoad(Guid); Err)
+        if (auto Err = xlioncore::Ecs(GameMgr).RequestLoadScene(Guid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to load Scene: {}", Err.getMessage()));
             return;

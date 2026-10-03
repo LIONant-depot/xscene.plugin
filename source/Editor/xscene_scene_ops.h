@@ -1,4 +1,5 @@
 #pragma once
+#include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
 
 // Scene bookkeeping the scene editing code shares: minting entity and folder ids, folder membership, and releasing a scene.
 namespace xscene
@@ -141,7 +142,7 @@ namespace xscene
         auto It = std::find(State.m_OpenScenes.begin(), State.m_OpenScenes.end(), Guid);
         if (It == State.m_OpenScenes.end()) return;
 
-        GameMgr.m_SceneMgr.ReleaseLoad(Guid);
+        xlioncore::Ecs(GameMgr).ReleaseLoadScene(Guid);
         State.m_OpenScenes.erase(It);
 
         if (State.m_SelectedEntityScene == Guid)

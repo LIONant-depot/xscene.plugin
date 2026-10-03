@@ -237,14 +237,14 @@ namespace xscene::commands
     //================================================================================================
     inline bool InstantiatePrefabIntoSceneWithId(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::prefab::guid PrefabGuid, xecs::scene::permanent_id ExplicitRootId, xecs::scene::folder_id TargetFolder) noexcept
     {
-        if (auto Err = GameMgr.m_PrefabMgr.EnsureLoaded(PrefabGuid); Err) return false;
+        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PrefabGuid); Err) return false;
         auto RootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(PrefabGuid.m_Instance.m_Value);
         if (RootIt == GameMgr.m_PrefabMgr.m_PrefabList.end()) return false;
         if (Scene.m_LocalToRuntime.contains(ExplicitRootId)) return false;
 
         // bRemoveRoot=false - same reasoning as InstantiatePrefabIntoScene's own comment: this needs
         // one standalone instantiated group, root included, not the root spliced away.
-        auto NewRoot = GameMgr.m_PrefabMgr.CreatePrefabInstance(1, RootIt->second, xecs::tools::empty_lambda{}, /*bRemoveRoot=*/false);
+        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(RootIt->second, /*bRemoveRoot=*/false);
 
         Scene.m_LocalToRuntime[ExplicitRootId]  = NewRoot;
         Scene.m_RuntimeToLocal[NewRoot.m_Value] = ExplicitRootId;
