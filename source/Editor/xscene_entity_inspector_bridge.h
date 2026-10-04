@@ -392,6 +392,13 @@ namespace xscene
                 const bool bResolved = xscene::ResolveEntityReference(GameMgr, State, CurrentValue, Label, TargetScene);
                 if (!bResolved) Label = CurrentValue.isValid() ? "<unresolved>" : "None";
 
+                // The hierarchy (the parent, the children): shown, never assigned or cleared here
+                if (auto ItC = m_ComponentMap.find(pInstance); ItC != m_ComponentMap.end() && xscene::IsStructuralComponent(ItC->second))
+                {
+                    ImGui::TextUnformatted(Label.c_str());
+                    return;
+                }
+
                 // A plain Text/TextUnformatted's own "last item" rect is only as wide as its glyphs -
                 // dropping anywhere else in this (usually much wider) property cell would silently miss
                 // BeginDragDropTarget's hover check entirely. Selectable with an explicit size fills the

@@ -112,6 +112,15 @@ namespace xscene
     // `pInfo == &info_v<T>` (which happens to hold today only because everything below is compiled
     // into this one host exe - see IsComponentType's own comment for the two live bugs elsewhere in
     // this codebase where that assumption silently broke instead).
+    // The two components that are the hierarchy itself: SHOWN in the inspector (a component is a type the systems query on: the person must see every one an entity has) but only
+    // read: who the parent is and who the children are is changed by making and deleting entities (a child list edited by hand would not agree with the parents), never by hand;
+    // and they are not in the Add Component list and have no x.
+    bool IsStructuralComponent(const xecs::component::type::info* pInfo) noexcept
+    {
+        using xecs::component::type::IsComponentType;
+        return IsComponentType<xecs::component::parent>(pInfo) || IsComponentType<xecs::component::children>(pInfo);
+    }
+
     bool IsInternalComponent(const xecs::component::type::info* pInfo) noexcept
     {
         using xecs::component::type::IsComponentType;

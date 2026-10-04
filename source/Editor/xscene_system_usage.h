@@ -21,6 +21,7 @@
 namespace xscene
 {
     bool IsInternalComponent(const xecs::component::type::info* pInfo) noexcept;   // xscene_prefab_overrides.h
+    bool IsStructuralComponent(const xecs::component::type::info* pInfo) noexcept; // xscene_prefab_overrides.h
 
     // Every user-visible component of an entity: data, share and tags (internal bookkeeping excluded).
     inline std::vector<const xecs::component::type::info*> UserComponents(xlioncore::xECSEditor& Ecs, xecs::component::entity Entity) noexcept
@@ -29,7 +30,7 @@ namespace xscene
         Ecs.ComponentTypesOf(Entity, Out, Share, Tags);
         Out.insert(Out.end(), Share.begin(), Share.end());
         Out.insert(Out.end(), Tags.begin(), Tags.end());
-        std::erase_if(Out, [](auto* p) noexcept { return xscene::IsInternalComponent(p); });
+        std::erase_if(Out, [](auto* p) noexcept { return xscene::IsInternalComponent(p) && !xscene::IsStructuralComponent(p); });
         return Out;
     }
 }

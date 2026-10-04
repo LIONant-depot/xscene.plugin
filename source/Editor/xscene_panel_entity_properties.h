@@ -343,7 +343,7 @@ namespace xscene
                     Bridge.m_TagComponents.clear();
                     for (auto pInfo : SortedComponents)
                     {
-                        if (xscene::IsInternalComponent(pInfo)) continue;
+                        if (xscene::IsInternalComponent(pInfo) && !xscene::IsStructuralComponent(pInfo)) continue;     // the hierarchy (parent, children) is shown, read only
                         if (pInfo->m_pPropertyTable == nullptr) continue;
 
                         // Genuine TAG kind only (not "zero reflected properties" - physics_body is DATA)
