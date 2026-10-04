@@ -42,6 +42,7 @@ namespace xscene
 
     // Shows the file of a type: the module's editor opens at it (or the system's editor for the file). Set by the application that owns the editors.
     inline std::function<bool(const type_source&)>                      g_OpenTypeSource;
+    inline std::function<std::string(const type_source&, bool bDryRun)> g_OpenTypeSourceInVisualStudio;   // the same file, in the Visual Studio of the game project; the reply says what happened
 
     // "SoccerGame . soccer_components.h", "Engine" for a built-in type, "" when nothing is known: the one line every hint shows.
     inline std::string DescribeSource(const type_source& S) noexcept
