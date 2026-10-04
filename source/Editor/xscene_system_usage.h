@@ -106,6 +106,42 @@ namespace xscene::system_usage
         return Out;
     }
 
+    // The events of the world and the systems that handle them: what the System Registry and ListEventHandlers show. A global event (the physics ones, say) is a group with its name, what it tells and
+    // when (its help), and the systems that are its handlers; the events a system defines for its own child systems are one group per system. A handler is an ordinary system: its declared components
+    // (what it reads and writes) are in its info.
+    struct event_group
+    {
+        std::string                                     m_Name;
+        std::string                                     m_Help;
+        bool                                            m_bGlobal = true;
+        std::vector<const xecs::system::type::info*>    m_Handlers;
+    };
+
+    inline std::vector<event_group> EventGroups(xecs::game_mgr::instance& GameMgr) noexcept
+    {
+        std::vector<event_group> Out;
+        for (const auto& E : GameMgr.m_EventRecords)
+        {
+            event_group G{ E.m_pName ? E.m_pName : "(unnamed event)", E.m_pHelp ? E.m_pHelp : "", true, {} };
+            for (const auto& H : GameMgr.m_EventHandlerRecords)
+                if (H.m_pOwner == nullptr && H.m_Event == E.m_Guid) G.m_Handlers.push_back(H.m_pSystem);
+            Out.push_back(std::move(G));
+        }
+        for (const auto& H : GameMgr.m_EventHandlerRecords)
+        {
+            if (H.m_pOwner == nullptr) continue;
+            const std::string Name = std::format("Events of {}", H.m_pOwner->m_pName ? H.m_pOwner->m_pName : "(unnamed system)");
+            auto It = std::find_if(Out.begin(), Out.end(), [&](const event_group& G) noexcept { return !G.m_bGlobal && G.m_Name == Name; });
+            if (It == Out.end())
+            {
+                Out.push_back({ Name, "Events the system defines for the systems connected to it: its handlers run when it raises them.", false, {} });
+                It = std::prev(Out.end());
+            }
+            It->m_Handlers.push_back(H.m_pSystem);
+        }
+        return Out;
+    }
+
     // The scheduler's own test (in the copy of the core the set belongs to): update systems also check the exclusive tags, notifiers do not.
     inline bool Matches(const system_ref& S, const component_set& Set) noexcept
     {
