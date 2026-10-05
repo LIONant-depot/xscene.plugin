@@ -57,7 +57,7 @@ namespace xscene
             if (pInfo->m_TypeID != xecs::component::type::id::DATA
                 && pInfo->m_TypeID != xecs::component::type::id::SHARE
                 && pInfo->m_TypeID != xecs::component::type::id::TAG) continue;
-            if (xscene::IsInternalComponent(pInfo)) continue;
+            if (xscene::IsInternalComponent(pInfo) || xscene::IsEditorStateComponent(pInfo)) continue;       // the editor's own state is the Level Tree's (power and eye)
             if (Bits.Has(pInfo->m_Guid.m_Value)) continue;
 
             xeditor::grouped_list_item Item;
@@ -77,12 +77,12 @@ namespace xscene
                 xeditor::hint::Draw({ .m_Topic = pInfo->m_pName ? pInfo->m_pName : "?", .m_Body = Change, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
             };
 
-            // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
-            if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *pInfo, true); !Change.empty())
-            {
-                if (!Change.m_Starts.empty()) Item.m_RightText += "+" + xscene::system_usage::JoinNames(Change.m_Starts);
-                if (!Change.m_Stops.empty())  Item.m_RightText += std::string(Item.m_RightText.empty() ? "" : "  ") + "-" + xscene::system_usage::JoinNames(Change.m_Stops);
-            }
+            // At-a-glance, right-aligned: what kind of component it is - Share, Data, Tag or Exclusive Tag (the two kinds of tag), and "Builder Share", "Builder Data", ... when builder systems consume it
+            // at creation (the systems it would start and stop are in the hint).
+            Item.m_RightText = std::string(pInfo->m_bBuilder ? "Builder " : "")
+                             + (pInfo->m_TypeID == xecs::component::type::id::SHARE ? "Share"
+                              : pInfo->m_TypeID == xecs::component::type::id::TAG   ? (pInfo->m_bExclusiveTag ? "Exclusive Tag" : "Tag")
+                              :                                                       "Data");
 
             Infos.push_back(pInfo);
             Items.push_back(std::move(Item));

@@ -121,6 +121,13 @@ namespace xscene
         return IsComponentType<xecs::component::parent>(pInfo) || IsComponentType<xecs::component::children>(pInfo);
     }
 
+    // The state of an entity in the editor (editor_disable, editor_no_render: xecs_editor.h): shown like any component, but not in the Add Component list - the Level Tree's power and eye are what set it.
+    bool IsEditorStateComponent(const xecs::component::type::info* pInfo) noexcept
+    {
+        using xecs::component::type::IsComponentType;
+        return IsComponentType<xecs::editor::disable_tag>(pInfo) || IsComponentType<xecs::editor::no_render_tag>(pInfo);
+    }
+
     bool IsInternalComponent(const xecs::component::type::info* pInfo) noexcept
     {
         using xecs::component::type::IsComponentType;

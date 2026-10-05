@@ -360,7 +360,8 @@ namespace xscene::commands
 
             if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene)
                 if (auto It = pScene->m_LocalToRuntime.find(Id); It != pScene->m_LocalToRuntime.end())
-                    if (const xecs::component::type::info* pHeld = nullptr; xlioncore::Ecs(World()).IsAlive(It->second) && !xlioncore::Ecs(World()).ResolveComponent(It->second, pInfo->m_Guid, pHeld))
+                    // HasComponent, not ResolveComponent: a tag has no data to resolve, it is only a bit of the archetype (removing static, disable, ... was refused as "does not have that component").
+                    if (xlioncore::Ecs(World()).IsAlive(It->second) && !xlioncore::Ecs(World()).HasComponent(It->second, pInfo->m_Guid))
                         return "RemoveComponent: the entity does not have that component";
 
             std::array<const xecs::component::type::info*, 1> Sub{ pInfo };
