@@ -161,11 +161,12 @@ namespace xscene
                     constexpr const char* kAddComponentPopupId = "AddComponentPopup";
                     if (ImGui::Button("Add Component"))
                         ImGui::OpenPopup(kAddComponentPopupId);
+                    const ImVec2 AddPopupPos(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y);        // under the button
                     // Drop a SharedComponentTemplate resource here to add+intern from serialized values.
                     if (xscene::TryAcceptSharedComponentTemplateDrop(Ed))
                         RefreshEntityView();
 
-                    ImGui::SetNextWindowSize(ImVec2(320.0f, 360.0f), ImGuiCond_Appearing);
+                    if (ImGui::IsPopupOpen(kAddComponentPopupId)) ImGui::SetNextWindowPos(AddPopupPos);    // aligned to the button, not to the mouse (the size is the list's: xeditor/grouped_list.h)
                     if (ImGui::BeginPopup(kAddComponentPopupId))
                     {
                         if (xscene::RenderComponentSelectorPopupContents(Ed, State.m_SelectedEntity))

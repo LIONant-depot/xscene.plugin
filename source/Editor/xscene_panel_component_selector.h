@@ -4,8 +4,8 @@
 
 // Component "Add" popup contents for Entity Properties.
 // Grouped by g_ComponentDisplayInfo category (E29_REGISTER_COMPONENT), collapsible
-// (initially closed), with a top search bar matching Level Tree / Asset views
-// (RenderTreeSearchBar + ContainsCaseInsensitive).
+// (initially closed), with a top search bar matching Level Tree / Asset views. The popup itself is
+// xeditor::RenderGroupedList (xeditor/grouped_list.h): this file only says what the items are.
 //
 // Meant to be included via the umbrella (xscene_entity_inspector_bridge.h) only, after
 // scene_state, g_ComponentDisplayInfo, and command infrastructure are defined.
@@ -16,6 +16,7 @@
 #include "plugins/xscene.plugin/source/Editor/xscene_component_display.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_system_usage.h"
 #include "dependencies/xeditor/include/xeditor/widgets.h"
+#include "dependencies/xeditor/include/xeditor/grouped_list.h"
 #include <cstring>
 
 namespace xscene
@@ -36,24 +37,16 @@ namespace xscene
             return false;
         }
 
-        xeditor::RenderTreeSearchBar(State.m_ComponentSelectorSearchString, ImGui::GetContentRegionAvail().x);
-        ImGui::Separator();
-
-        const bool bHasSearch = !State.m_ComponentSelectorSearchString.empty();
-
-        struct component_entry
-        {
-            const xecs::component::type::info* m_pInfo = nullptr;
-            std::string                         m_Category;
-            int                                 m_Priority = 0;
-        };
-
-        // Registry (not the entity DataSpan) â€” same source as the old BeginCombo list.
-        const auto Bits = xscene::system_usage::SetOf(Ed.World(), Entity);            // what the entity has already (every kind: data, share, tags)
+        // Registry (not the entity DataSpan) - same source as the old BeginCombo list.
+        const auto Bits    = xscene::system_usage::SetOf(Ed.World(), Entity);            // what the entity has already (every kind: data, share, tags)
+        const auto Systems = xscene::system_usage::AllSystems(Ed.World());
         std::vector<const xecs::component::type::info*> Registered;
         Ecs.ListComponentTypes(Registered);
-        std::vector<component_entry> Available;
-        Available.reserve(Registered.size());
+
+        std::vector<const xecs::component::type::info*> Infos;                       // Infos[i] is what Items[i] is
+        std::vector<xeditor::grouped_list_item>         Items;
+        Infos.reserve(Registered.size());
+        Items.reserve(Registered.size());
 
         for (auto* pInfo : Registered)
         {
@@ -67,123 +60,45 @@ namespace xscene
             if (xscene::IsInternalComponent(pInfo)) continue;
             if (Bits.Has(pInfo->m_Guid.m_Value)) continue;
 
-            const char* pName = pInfo->m_pName ? pInfo->m_pName : "";
-            // The search looks at the module's name too: typing "Soccer" finds the components of the SoccerGame module
-            if (bHasSearch && !xeditor::ContainsCaseInsensitive(pName, State.m_ComponentSelectorSearchString)
-                && !xeditor::ContainsCaseInsensitive(Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value).m_ModuleName.c_str(), State.m_ComponentSelectorSearchString))
-                continue;
-
-            std::string Category;
-            int         Priority = 0;
+            xeditor::grouped_list_item Item;
+            Item.m_Name        = pInfo->m_pName ? pInfo->m_pName : "";
+            Item.m_SearchExtra = Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value).m_ModuleName;          // typing "Soccer" finds the components of the SoccerGame module
             if (auto It = Ed.Display().m_Categories.find(pInfo->m_pName); It != Ed.Display().m_Categories.end())
             {
-                Category = It->second.m_Category;
-                Priority = It->second.m_Priority;
+                Item.m_Group    = It->second.m_Category;
+                Item.m_Priority = It->second.m_Priority;
             }
 
-            Available.push_back({ pInfo, std::move(Category), Priority });
-        }
-
-        std::stable_sort(Available.begin(), Available.end(),
-            [](const component_entry& A, const component_entry& B) noexcept
+            // The hint of the item: what adding it changes (the systems that start and stop), and where it comes from.
+            Item.m_OnHover = [&Ed, &Systems, &Bits, pInfo]() noexcept
             {
-                if (A.m_Category != B.m_Category) return A.m_Category < B.m_Category;
-                if (A.m_Priority != B.m_Priority) return A.m_Priority < B.m_Priority;
-                const char* NA = A.m_pInfo->m_pName ? A.m_pInfo->m_pName : "";
-                const char* NB = B.m_pInfo->m_pName ? B.m_pInfo->m_pName : "";
-                return std::strcmp(NA, NB) < 0;
-            });
+                const std::string Change = xscene::system_usage::DescribeChange(Systems, Bits, *pInfo, true);
+                const std::string From   = xscene::DescribeSource(Ed.Display().SourceOf(false, pInfo->m_Guid.m_Value));
+                xeditor::hint::Draw({ .m_Topic = pInfo->m_pName ? pInfo->m_pName : "?", .m_Body = Change, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
+            };
 
-        struct category_group
-        {
-            std::string                  m_Name;
-            std::vector<component_entry> m_Components;
-        };
-
-        std::vector<category_group> Groups;
-        for (auto& Comp : Available)
-        {
-            if (Groups.empty() || Groups.back().m_Name != Comp.m_Category)
-                Groups.push_back({ Comp.m_Category, {} });
-            Groups.back().m_Components.push_back(std::move(Comp));
-        }
-
-        if (Groups.empty())
-        {
-            ImGui::TextDisabled(bHasSearch ? "No matching components." : "No components to add.");
-            return false;
-        }
-
-        bool bAdded = false;
-        const auto  Systems = xscene::system_usage::AllSystems(Ed.World());
-
-        ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 8.0f);
-        ImGui::BeginChild("##ComponentSelectorList", ImVec2(0, 0), ImGuiChildFlags_None);
-
-        for (auto& Group : Groups)
-        {
-            const std::string DisplayName = Group.m_Name.empty() ? "Uncategorized" : Group.m_Name;
-            const std::string GroupLabel  = std::format("{} ({})", DisplayName, Group.m_Components.size());
-
-            bool bOpen = false;
-            if (bHasSearch)
+            // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
+            if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *pInfo, true); !Change.empty())
             {
-                bOpen = true;
-            }
-            else if (auto ItOpen = State.m_ComponentSelectorCategoryOpen.find(Group.m_Name);
-                     ItOpen != State.m_ComponentSelectorCategoryOpen.end())
-            {
-                bOpen = ItOpen->second;
+                if (!Change.m_Starts.empty()) Item.m_RightText += "+" + xscene::system_usage::JoinNames(Change.m_Starts);
+                if (!Change.m_Stops.empty())  Item.m_RightText += std::string(Item.m_RightText.empty() ? "" : "  ") + "-" + xscene::system_usage::JoinNames(Change.m_Stops);
             }
 
-            ImGui::SetNextItemOpen(bOpen, ImGuiCond_Always);
-            const ImGuiTreeNodeFlags GroupFlags = ImGuiTreeNodeFlags_SpanFullWidth; // whole row toggles (no OpenOnArrow)
-            const bool bNodeOpen = ImGui::TreeNodeEx(GroupLabel.c_str(), GroupFlags);
-            if (!bHasSearch)
-                State.m_ComponentSelectorCategoryOpen[Group.m_Name] = bNodeOpen;
-
-            if (!bNodeOpen)
-                continue;
-
-            for (auto& Comp : Group.m_Components)
-            {
-                ImGui::PushID(Comp.m_pInfo->m_pName);
-                const bool bClicked = ImGui::Selectable(Comp.m_pInfo->m_pName);
-                if (ImGui::IsItemHovered())
-                {
-                    const std::string Change = xscene::system_usage::DescribeChange(Systems, Bits, *Comp.m_pInfo, true);
-                    const std::string From   = xscene::DescribeSource(Ed.Display().SourceOf(false, Comp.m_pInfo->m_Guid.m_Value));
-                    xeditor::hint::Draw({ .m_Topic = Comp.m_pInfo->m_pName ? Comp.m_pInfo->m_pName : "?", .m_Body = Change, .m_Detail = From.empty() ? std::string_view() : std::string_view(From) });
-                }
-
-                // At-a-glance hint, right-aligned: which systems this entity would gain/lose.
-                if (const auto Change = xscene::system_usage::WhatIf(Systems, Bits, *Comp.m_pInfo, true); !Change.empty())
-                {
-                    std::string Hint;
-                    if (!Change.m_Starts.empty()) Hint += "+" + xscene::system_usage::JoinNames(Change.m_Starts);
-                    if (!Change.m_Stops.empty())  Hint += std::string(Hint.empty() ? "" : "  ") + "-" + xscene::system_usage::JoinNames(Change.m_Stops);
-                    ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(Hint.c_str()).x);
-                    ImGui::TextDisabled("%s", Hint.c_str());
-                }
-
-                if (bClicked)
-                {
-                    xeditor::Run(Ed.m_Undo, std::format("AddComponent -Scene {} -Id {} -Component {:016X}"
-                        , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
-                        , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
-                        , Comp.m_pInfo->m_Guid.m_Value
-                    ));
-                    bAdded = true;
-                    ImGui::CloseCurrentPopup();
-                }
-                ImGui::PopID();
-            }
-            ImGui::TreePop();
+            Infos.push_back(pInfo);
+            Items.push_back(std::move(Item));
         }
 
-        ImGui::EndChild();
-        ImGui::PopStyleVar(1);
-        return bAdded;
+        // The search, the groups and the items are the one popup of the editors (xeditor/grouped_list.h), the same as the "+" of the resource view.
+        const int Chosen = xeditor::RenderGroupedList(State.m_ComponentSelectorSearchString, State.m_ComponentSelectorCategoryOpen, Items
+            , { .m_NoMatch = "No matching components.", .m_NoItems = "No components to add." });
+        if (Chosen < 0) return false;
+
+        xeditor::Run(Ed.m_Undo, std::format("AddComponent -Scene {} -Id {} -Component {:016X}"
+            , xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene)
+            , xscene::commands::FormatEntityId(State.m_SelectedEntityId)
+            , Infos[Chosen]->m_Guid.m_Value
+        ));
+        return true;
     }
 } // namespace xscene
 
