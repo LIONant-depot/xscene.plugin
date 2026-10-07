@@ -191,25 +191,36 @@ namespace xscene
                     return;
                 }
 
-                // The prefab's member at the same address (its id in the prefab: see xecs::editor::member_address).
-                const auto BaseEntity = xlioncore::Ecs(GameMgr).ResolvePrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
-                if (BaseEntity.isValid() == false) return;
-
-                // DATA components live in the entity's own pool row, SHARE components on the family's share
-                // entity - findIndexComponentFromInfo is -1 for a SHARE one, which used to make this return
-                // silently and left every overridden property of a shared component impossible to revert.
-                void* pRootData = xscene::ResolveComponentPointer(GameMgr, BaseEntity, *It->second);
-                if (pRootData == nullptr) return;
+                // The prefab's member at the same address (its id in the prefab: see xecs::editor::member_address) as an instance of the prefab starts from it: with the recipes of the prefab's nested
+                // instances applied (the inner prefab's own template member would give the value without them).
+                const auto BakedEntity    = xlioncore::Ecs(GameMgr).ResolveBakedPrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                const auto TemplateEntity = xlioncore::Ecs(GameMgr).ResolvePrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                if (BakedEntity.isValid() == false && TemplateEntity.isValid() == false) return;
 
                 xproperty::settings::context Context;
                 xproperty::any               BaseValue;
                 xproperty::any               CurrentValue;
                 bool                         bFoundBase = false;
                 bool                         bFoundCurrent = false;
-                xproperty::sprop::collector(pRootData, Obj, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+
+                // DATA components live in the entity's own pool row, SHARE components on the family's share
+                // entity - findIndexComponentFromInfo is -1 for a SHARE one, which used to make this return
+                // silently and left every overridden property of a shared component impossible to revert.
+                const auto ReadBase = [&](xecs::component::entity Entity) noexcept
                 {
-                    if (Path == pPropertyName) { BaseValue = std::move(Data); bFoundBase = true; }
-                });
+                    bFoundBase = false;
+                    if (Entity.isValid() == false) return;
+                    void* pRootData = xscene::ResolveComponentPointer(GameMgr, Entity, *It->second);
+                    if (pRootData == nullptr) return;
+                    xproperty::sprop::collector(pRootData, Obj, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+                    {
+                        if (Path == pPropertyName) { BaseValue = std::move(Data); bFoundBase = true; }
+                    });
+                };
+                // The baked member has the recipes of the nested instances applied, but its references are null (a plan holds none): a reference property, and a component the baked member
+                // does not have, are read from the template member instead.
+                ReadBase(BakedEntity);
+                if (bFoundBase == false || BaseValue.getTypeGuid() == xproperty::settings::var_type<xecs::component::entity>::guid_v) ReadBase(TemplateEntity);
                 xproperty::sprop::collector(pInstance, Obj, Context, [&](const char* pPropertyName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
                 {
                     if (Path == pPropertyName) { CurrentValue = std::move(Data); bFoundCurrent = true; }

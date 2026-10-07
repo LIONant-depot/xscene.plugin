@@ -44,6 +44,8 @@ namespace xscene
         std::unique_ptr<xecs::game_mgr::instance>& m_pWorld;
         xundo::system&                             m_Undo;      // every edit of this editor's document goes through it
         component_display*                         m_pDisplay = nullptr;     // what this editor knows about its types (its game module's categories and sources), set by its session
+        // A prefab was just made from this editor's world (MakePrefab, MakePrefabVariant): the editor that knows what Game the work is done under gives the prefab that Game to play with (prefabs_plan.md, D2).
+        std::function<void(xresource::full_guid)>  m_OnPrefabMade;
 
         xecs::game_mgr::instance& World() noexcept { return *m_pWorld; }
         const component_display& Display() const noexcept { static const component_display s_Nothing; return m_pDisplay ? *m_pDisplay : s_Nothing; }

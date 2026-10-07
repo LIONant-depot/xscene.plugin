@@ -58,6 +58,7 @@ namespace xscene::commands
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene) return "CreateFolder: scene not found";
+            if (pScene->m_bPrefabDocument) return "CreateFolder: a prefab has no folders (they are the organization of a scene; the prefab is one tree under its root)";
             if (std::ranges::find(pScene->m_Folders, Id, &xecs::scene::folder::m_Id) != pScene->m_Folders.end())
                 return "CreateFolder: id already in use";
             if (ParentVal != xecs::scene::invalid_folder_id_v && std::ranges::find(pScene->m_Folders, ParentVal, &xecs::scene::folder::m_Id) == pScene->m_Folders.end())
@@ -281,6 +282,7 @@ namespace xscene::commands
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene) return "InstantiatePrefab: scene not found";
+            if (pScene->m_bPrefabDocument && pScene->m_Guid.m_Instance == PrefabGuid.m_Instance) return "InstantiatePrefab: a prefab cannot hold an instance of itself";
             if (pScene->m_LocalToRuntime.contains(Id)) return "InstantiatePrefab: id already in use";
 
             xecs::component::entity Parent{};

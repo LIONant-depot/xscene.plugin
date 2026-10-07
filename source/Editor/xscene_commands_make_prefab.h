@@ -306,6 +306,7 @@ namespace xscene::commands
             const auto Result = CreatePrefabFromGroupRootWithAssetGuid(World(), *pScene, SceneGuid, &State(), xresource_editor::g_LibMgr, LibraryGuid, ParentGuid, Root, AssetGuid, Outside);
             if (Result.empty()) return "MakePrefab: failed";
             KeepOutsideReferencesAsOverrides(World(), *pScene, Id, xecs::prefab::guid{ AssetGuid }, Outside);
+            if (SceneContext().m_OnPrefabMade) SceneContext().m_OnPrefabMade(Result);
             return {};
         }
 
@@ -417,6 +418,7 @@ namespace xscene::commands
             xlioncore::Ecs(World()).CreatePrefabFromEntity(Entity, PrefabGuid, nullptr, nullptr);
             if (auto Err = xlioncore::Ecs(World()).SavePrefab(PrefabGuid); Err)
                 return std::format("MakePrefabVariant: {}", Err.getMessage());
+            if (SceneContext().m_OnPrefabMade) SceneContext().m_OnPrefabMade(AssetGuid);
 
             // the pools may have moved while the prefab was made: resolved again. The instance is now one of the variant, which holds what it did
             // differently: its own recipe is empty (its members keep their addresses: a variant's root adds no element to them)
