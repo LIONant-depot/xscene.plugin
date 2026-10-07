@@ -64,7 +64,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",    true, 1);
-            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 hex digits", true, 1);
+            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 or 16 hex digits", true, 1);
             m_hBefore = m_Parser.addOption("Before", "Previous position, base64",    true, 1);
             m_hAfter  = m_Parser.addOption("After",  "New position, base64",         true, 1);
         }
@@ -98,14 +98,14 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
-            File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
+            File.Write(std::holds_alternative<xerr>(IdArg)    ? xecs::scene::permanent_id{0} : ParseEntityId(std::get<std::string>(IdArg)));
             File.Write(std::holds_alternative<xerr>(BeforeArg) ? xmath::fvec3::fromZero() : UnpackBlob<xmath::fvec3>(std::get<std::string>(BeforeArg)));
         }
 
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id = 0;    File.Read(Id);
+            xecs::scene::permanent_id Id = 0;    File.Read(Id);
             xmath::fvec3  Before{};  File.Read(Before);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
@@ -136,7 +136,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",    true, 1);
-            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 hex digits", true, 1);
+            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 or 16 hex digits", true, 1);
             m_hBefore = m_Parser.addOption("Before", "Previous rotation, base64",    true, 1);
             m_hAfter  = m_Parser.addOption("After",  "New rotation, base64",         true, 1);
         }
@@ -171,14 +171,14 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
-            File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
+            File.Write(std::holds_alternative<xerr>(IdArg)    ? xecs::scene::permanent_id{0} : ParseEntityId(std::get<std::string>(IdArg)));
             File.Write(std::holds_alternative<xerr>(BeforeArg) ? xmath::fquat::fromIdentity() : UnpackBlob<xmath::fquat>(std::get<std::string>(BeforeArg)));
         }
 
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id = 0;    File.Read(Id);
+            xecs::scene::permanent_id Id = 0;    File.Read(Id);
             xmath::fquat  Before{};  File.Read(Before);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
@@ -208,7 +208,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",    true, 1);
-            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 hex digits", true, 1);
+            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 or 16 hex digits", true, 1);
             m_hBefore = m_Parser.addOption("Before", "Previous scale, base64",       true, 1);
             m_hAfter  = m_Parser.addOption("After",  "New scale, base64",            true, 1);
         }
@@ -241,14 +241,14 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
-            File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
+            File.Write(std::holds_alternative<xerr>(IdArg)    ? xecs::scene::permanent_id{0} : ParseEntityId(std::get<std::string>(IdArg)));
             File.Write(std::holds_alternative<xerr>(BeforeArg) ? xmath::fvec3::fromOne() : UnpackBlob<xmath::fvec3>(std::get<std::string>(BeforeArg)));
         }
 
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id = 0;    File.Read(Id);
+            xecs::scene::permanent_id Id = 0;    File.Read(Id);
             xmath::fvec3  Before{};  File.Read(Before);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };

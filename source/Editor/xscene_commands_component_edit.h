@@ -168,8 +168,8 @@ namespace xscene::commands
     {
         auto Ctx = xscene::FindContainingPrefabInstance(Ed.World(), Entity);
         if (Ctx.m_pPI == nullptr) return;
-        auto& MemberPath = Ctx.m_MemberPath;
-        std::erase_if(Ctx.m_pPI->m_lComponents, [&](auto& C) noexcept { return C.m_ComponentTypeGuid == ComponentTypeGuidValue && std::ranges::equal(C.m_MemberPath, MemberPath); });
+        auto& Member = Ctx.m_Member;
+        std::erase_if(Ctx.m_pPI->m_lComponents, [&](auto& C) noexcept { return C.m_ComponentTypeGuid == ComponentTypeGuidValue && std::ranges::equal(C.m_Member, Member); });
 
         if (Ctx.m_RootEntity.m_Value != Entity.m_Value)
         {
@@ -192,15 +192,15 @@ namespace xscene::commands
         auto Ctx = xscene::FindContainingPrefabInstance(Ed.World(), Entity);
         if (Ctx.m_pPI)
         {
-            auto It = std::ranges::find_if(Ctx.m_pPI->m_lComponents, [&](auto& C) noexcept { return C.m_ComponentTypeGuid == Info.m_Guid.m_Value && std::ranges::equal(C.m_MemberPath, Ctx.m_MemberPath); });
+            auto It = std::ranges::find_if(Ctx.m_pPI->m_lComponents, [&](auto& C) noexcept { return C.m_ComponentTypeGuid == Info.m_Guid.m_Value && std::ranges::equal(C.m_Member, Ctx.m_Member); });
             if (It != Ctx.m_pPI->m_lComponents.end()) pFound = &*It;
         }
 
         File.Write(pFound != nullptr);
         if (pFound)
         {
-            File.Write(static_cast<std::uint32_t>(pFound->m_MemberPath.size()));
-            for (auto P : pFound->m_MemberPath) File.Write(P);
+            File.Write(static_cast<std::uint32_t>(pFound->m_Member.size()));
+            for (auto P : pFound->m_Member) File.Write(P);
             File.Write(static_cast<std::uint32_t>(pFound->m_PropertyOverrides.size()));
             for (auto& O : pFound->m_PropertyOverrides)
             {
@@ -227,7 +227,7 @@ namespace xscene::commands
         bool bHadEntry = false; File.Read(bHadEntry);
 
         std::uint32_t PathCount = 0; File.Read(PathCount);
-        std::vector<std::uint32_t> MemberPath(PathCount);
+        xecs::editor::member_address MemberPath(PathCount);
         for (auto& P : MemberPath) File.Read(P);
 
         struct override_row { std::string m_Name, m_ValueStr; };
@@ -269,7 +269,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",  true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
         }
 
@@ -300,7 +300,7 @@ namespace xscene::commands
             auto CompArg  = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             File.Write(Scene);
@@ -311,7 +311,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;     File.Read(Scene);
-            std::uint32_t Id = 0;        File.Read(Id);
+            xecs::scene::permanent_id Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ Component });
@@ -339,7 +339,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",  true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
         }
 
@@ -381,7 +381,7 @@ namespace xscene::commands
             auto CompArg  = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
 
             File.Write(Scene);
@@ -410,7 +410,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;     File.Read(Scene);
-            std::uint32_t Id = 0;        File.Read(Id);
+            xecs::scene::permanent_id Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ Component });

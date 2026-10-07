@@ -38,7 +38,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene = m_Parser.addOption("Scene", "Scene guid, 16 hex digits", true, 1);
-            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 hex digits", true, 1);
+            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 or 16 hex digits", true, 1);
         }
 
         std::string Redo() noexcept override
@@ -110,7 +110,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene = m_Parser.addOption("Scene", "Scene guid, 16 hex digits", true, 1);
-            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 hex digits", true, 1);
+            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 or 16 hex digits", true, 1);
         }
 
         std::string Redo() noexcept override

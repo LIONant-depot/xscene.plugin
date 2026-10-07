@@ -156,7 +156,7 @@ namespace xscene::commands
 
             std::uint32_t OldParent = static_cast<std::uint32_t>(xecs::scene::invalid_folder_id_v);
             std::string   OldName;
-            std::vector<std::uint32_t> EntityIds;
+            std::vector<xecs::scene::permanent_id> EntityIds;
             std::vector<std::uint32_t> ChildFolderIds;
 
             if (auto* pScene = World().m_SceneMgr.Find(xecs::scene::guid{ .m_Instance = { Scene } }))
@@ -165,7 +165,7 @@ namespace xscene::commands
                 {
                     OldParent = static_cast<std::uint32_t>(FolderIt->m_Parent);
                     OldName   = FolderIt->m_Name;
-                    for (auto EId : FolderIt->m_Entities) EntityIds.push_back(static_cast<std::uint32_t>(EId));
+                    for (auto EId : FolderIt->m_Entities) EntityIds.push_back(EId);
                 }
                 for (auto& F : pScene->m_Folders)
                     if (F.m_Parent == static_cast<xecs::scene::folder_id>(Id)) ChildFolderIds.push_back(static_cast<std::uint32_t>(F.m_Id));
@@ -188,7 +188,7 @@ namespace xscene::commands
 
             std::uint32_t EntityCount = 0; File.Read(EntityCount);
             std::vector<xecs::scene::permanent_id> Entities(EntityCount);
-            for (auto& E : Entities) { std::uint32_t V = 0; File.Read(V); E = static_cast<xecs::scene::permanent_id>(V); }
+            for (auto& E : Entities) File.Read(E);
 
             std::uint32_t ChildCount = 0; File.Read(ChildCount);
             std::vector<std::uint32_t> ChildFolderIds(ChildCount);
@@ -226,40 +226,20 @@ namespace xscene::commands
     };
 
     //================================================================================================
-    // InstantiatePrefab - mirrors xscene::InstantiatePrefabIntoScene (xscene_prefab_authoring.h) exactly,
-    // except the group's ROOT is registered under an EXPLICIT, caller-minted id rather than an
-    // auto-minted one - same "-Id is pre-minted by the caller" convention create_entity_cmd already
-    // established (xscene_commands_entity_lifecycle.h), needed so Redo stays deterministic/re-runnable
-    // across an Undo/Redo cycle. The group's DESCENDANTS still get freshly-minted ids on every Redo
-    // call (via the existing RegisterInstantiatedSubtree) - safe, because Undo discovers them
-    // dynamically by walking the root's own LIVE children (DeleteSubtreeByPermanentId, reused
-    // verbatim from Phase 4), never by remembering descendant ids from a prior Redo.
+    // InstantiatePrefab - a new instance of a Prefab asset in a scene, its root registered under an EXPLICIT, caller-minted id (same "-Id is
+    // pre-minted by the caller" convention create_entity_cmd established, xscene_commands_entity_lifecycle.h, so Redo stays deterministic
+    // across an Undo/Redo cycle). An instance is a recipe (prefabs_plan.md, phase 3): its members get ids derived from the root's id and their
+    // address in the prefab, so a Redo gives them the same ids again. -Parent puts the instance under an entity of the scene (a member of
+    // another instance included: then the instance is an entity of the scene added under that member) - what makes a prefab holding an instance
+    // as a non-root member buildable from the command line (MakePrefab of the parent). Undo deletes the whole group (DeleteSubtreeByPermanentId).
     //================================================================================================
-    inline bool InstantiatePrefabIntoSceneWithId(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::prefab::guid PrefabGuid, xecs::scene::permanent_id ExplicitRootId, xecs::scene::folder_id TargetFolder) noexcept
+    inline bool InstantiatePrefabIntoSceneWithId(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::prefab::guid PrefabGuid, xecs::scene::permanent_id ExplicitRootId, xecs::scene::folder_id TargetFolder, xecs::component::entity Parent = {}) noexcept
     {
-        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PrefabGuid); Err) return false;
-        auto RootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(PrefabGuid.m_Instance.m_Value);
-        if (RootIt == GameMgr.m_PrefabMgr.m_PrefabList.end()) return false;
         if (Scene.m_LocalToRuntime.contains(ExplicitRootId)) return false;
-
-        // bRemoveRoot=false - same reasoning as InstantiatePrefabIntoScene's own comment: this needs
-        // one standalone instantiated group, root included, not the root spliced away.
-        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(RootIt->second, /*bRemoveRoot=*/false);
-
-        Scene.m_LocalToRuntime[ExplicitRootId]  = NewRoot;
-        Scene.m_RuntimeToLocal[NewRoot.m_Value] = ExplicitRootId;
-        GameMgr.m_SceneMgr.MarkEntityNew(Scene.m_Guid, ExplicitRootId);
-
-        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
-        {
-            auto ChildEntities = pNewChildren->m_List;
-            for (auto Child : ChildEntities)
-                xscene::RegisterInstantiatedSubtree(GameMgr, Scene, Scene.m_Guid, Child);
-        }
-
-        if (TargetFolder != xecs::scene::invalid_folder_id_v)
+        const auto NewRoot = xlioncore::Ecs(GameMgr).InstantiatePrefabInScene(Scene, PrefabGuid, ExplicitRootId, Parent);
+        if (NewRoot.isValid() == false) return false;
+        if (TargetFolder != xecs::scene::invalid_folder_id_v && Parent.isValid() == false)
             xscene::ReparentEntityIntoFolder(Scene, ExplicitRootId, TargetFolder);
-        xscene::AttachPrefabInstanceComponent(GameMgr, Scene, ExplicitRootId, NewRoot, PrefabGuid, nullptr); // brand-new, can't already be selected
         return true;
     }
 
@@ -268,14 +248,15 @@ namespace xscene::commands
         instantiate_prefab_cmd(xundo::system& System, void* pDataBase) noexcept : scene_command(System, "InstantiatePrefab", pDataBase) { RegisterArguments(); }
         const char* getCommandHelp() const noexcept override
         {
-            return "Instantiates a Prefab asset into a scene (undoable - deletes the whole group again on Undo). Usage: InstantiatePrefab -Scene hexguid -Id hexid -Prefab hexguid -Folder hexfolder (0 = loose)";
+            return "Instantiates a Prefab asset into a scene (undoable - deletes the whole group again on Undo). Its members get ids derived from -Id and their place in the prefab. Usage: InstantiatePrefab -Scene hexguid -Id hexid -Prefab hexguid -Folder hexfolder (0 = loose) [-Parent hexid]";
         }
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",                                       true, 1);
-            m_hId     = m_Parser.addOption("Id",     "Root entity permanent_id, 8 hex digits, pre-minted by the caller", true, 1);
+            m_hId     = m_Parser.addOption("Id",     "Root entity permanent_id, 8 or 16 hex digits, pre-minted by the caller", true, 1);
             m_hPrefab = m_Parser.addOption("Prefab",  "Prefab asset's instance guid, 16 hex digits",                     true, 1);
             m_hFolder = m_Parser.addOption("Folder", "Target folder id, 8 hex digits (0 = loose/none)",                 true, 1);
+            m_hParent = m_Parser.addOption("Parent", "Parent entity permanent_id, 8 or 16 hex digits: the instance goes under it (the folder is ignored)", false, 1);
         }
 
         std::string Redo() noexcept override
@@ -289,6 +270,7 @@ namespace xscene::commands
 
             const auto SceneGuid  = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id         = ParseEntityId(std::get<std::string>(IdArg));
+            if (Id > xecs::scene::max_permanent_id_v) return "InstantiatePrefab: the id does not fit in 63 bits (the top bit is reserved)";
             // xecs::prefab::guid is a full_guid (instance+type), but the type half is always
             // xecs::prefab::type_guid_v for anything reaching this command - same assumption the
             // existing drag-drop call site itself makes (E29_Panel_LevelTree.h checks
@@ -301,7 +283,15 @@ namespace xscene::commands
             if (!pScene) return "InstantiatePrefab: scene not found";
             if (pScene->m_LocalToRuntime.contains(Id)) return "InstantiatePrefab: id already in use";
 
-            if (!InstantiatePrefabIntoSceneWithId(World(), *pScene, PrefabGuid, Id, FolderVal))
+            xecs::component::entity Parent{};
+            if (auto ParentArg = m_Parser.getOptionArgAs<std::string>(m_hParent, 0); !std::holds_alternative<xerr>(ParentArg))
+            {
+                auto It = pScene->m_LocalToRuntime.find(ParseEntityId(std::get<std::string>(ParentArg)));
+                if (It == pScene->m_LocalToRuntime.end()) return "InstantiatePrefab: parent not found";
+                Parent = It->second;
+            }
+
+            if (!InstantiatePrefabIntoSceneWithId(World(), *pScene, PrefabGuid, Id, FolderVal, Parent))
                 return "InstantiatePrefab: failed to load/instantiate prefab";
 
             State().m_bEntityInspectorDirty = true;
@@ -316,7 +306,7 @@ namespace xscene::commands
             auto IdArg    = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
 
             const std::uint64_t Scene = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id    = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             File.Write(Scene);
             File.Write(Id);
         }
@@ -324,7 +314,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id = 0;    File.Read(Id);
+            xecs::scene::permanent_id Id = 0;    File.Read(Id);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
             const auto PermId    = static_cast<xecs::scene::permanent_id>(Id);
@@ -335,7 +325,7 @@ namespace xscene::commands
                     pScene->m_PendingChanges[PermId].m_New -= 1;
         }
 
-        xcmdline::parser::handle m_hScene, m_hId, m_hPrefab, m_hFolder;
+        xcmdline::parser::handle m_hScene, m_hId, m_hPrefab, m_hFolder, m_hParent;
     };
 
     //================================================================================================
@@ -359,7 +349,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",                    true, 1);
-            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 hex digits",             true, 1);
+            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 or 16 hex digits",    true, 1);
             m_hFolder = m_Parser.addOption("Folder", "Target folder id, 8 hex digits (0 = loose)",   true, 1);
         }
 
@@ -396,7 +386,7 @@ namespace xscene::commands
             auto FolderArg = m_Parser.getOptionArgAs<std::string>(m_hFolder, 0);
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id       = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint32_t FolderVal = std::holds_alternative<xerr>(FolderArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(FolderArg).c_str(), nullptr, 16));
 
             File.Write(Scene);
@@ -451,7 +441,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;        File.Read(Scene);
-            std::uint32_t Id = 0;           File.Read(Id);
+            xecs::scene::permanent_id Id = 0;           File.Read(Id);
             std::uint32_t FolderVal = 0;    File.Read(FolderVal);
             std::uint32_t OldFolder = 0;    File.Read(OldFolder);
             std::uint32_t OldIndex = 0;     File.Read(OldIndex);

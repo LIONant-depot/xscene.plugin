@@ -8,77 +8,23 @@
 #include "dependencies/xLIONCore/src/game/xlioncore_editor.h"
 
 // Extracted from xscene_entity_inspector_bridge.h (mechanical move, phase 2 of the kit split - see the
-// umbrella file's own top comment). Prefab creation/instancing/deletion (RegisterInstantiatedSubtree
-// through CreatePrefabVariantFromInstance), plus the drag-payload + drop registration that turns a
-// Level-tree entity into a Prefab asset (entity_to_prefab_drop) - kept together rather than split
-// further since the drop handler directly calls the authoring functions above it and shares their
-// the editor context, not a separately-reusable concern on its own. Meant to be
-// included via the umbrella only, after xscene_prefab_overrides.h (AttachPrefabInstanceComponent).
+// umbrella file's own top comment). The deletion of a subtree, the group root of a multi-selection, and
+// the drag-payload + drop registration that turns a Level-tree entity into a Prefab asset
+// (entity_to_prefab_drop, routed through the MakePrefab / MakePrefabVariant commands). Placing an
+// instance is the engine's (xECSEditor::InstantiatePrefabInScene: prefabs_plan.md phase 3, an instance
+// is a recipe). Meant to be included via the umbrella only, after xscene_prefab_overrides.h.
 
 namespace xscene
 {
-    // Recursively registers every entity in a freshly-instantiated prefab subtree (Entity itself,
-    // plus - if it has children - every descendant) into Scene's bookkeeping under a freshly minted
-    // permanent_id each, marking each new. Shared by InstantiatePrefabIntoScene (the whole returned
-    // group needs registering) and CreatePrefabFromGroupRoot (only the NEW group's children need fresh
-    // ids - its root keeps a preserved one, registered separately by the caller).
-    void RegisterInstantiatedSubtree(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, xecs::component::entity Entity) noexcept
-    {
-        const auto Id = NextFreeEntityId(Scene);
-        Scene.m_LocalToRuntime[Id]              = Entity;
-        Scene.m_RuntimeToLocal[Entity.m_Value]  = Id;
-        GameMgr.m_SceneMgr.MarkEntityNew(SceneGuid, Id);
-
-        auto* pChildren = xlioncore::Ecs(GameMgr).ChildrenOf(Entity);
-        if (pChildren == nullptr) return;
-
-        // Snapshot - registering a child only ever touches Scene's own maps, never this entity's OWN
-        // children list, so a plain copy is enough (no in-place-mutation hazard to guard against here).
-        auto ChildEntities = pChildren->m_List;
-        for (auto Child : ChildEntities)
-            RegisterInstantiatedSubtree(GameMgr, Scene, SceneGuid, Child);
-    }
-
-    // Loads PrefabGuid (if not already resident) and instantiates it into Scene under a fresh
-    // permanent_id - the shared tail of both the drag-a-prefab-onto-the-scene-tree flow and (until it
-    // existed) the old "+ Instantiate Prefab" button. TargetFolder (invalid = loose, rendered directly
-    // at scene root) lets a drop directly onto a specific folder row land the new instance there
-    // instead of always landing loose regardless of where the user actually dropped it.
-    void InstantiatePrefabIntoScene(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::prefab::guid PrefabGuid, xecs::scene::folder_id TargetFolder = xecs::scene::invalid_folder_id_v) noexcept
-    {
-        if (auto Err = xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(PrefabGuid); Err)
-        {
-            xeditor::NotifyToast(std::format("Failed to load Prefab: {}", Err.getMessage()));
-            return;
-        }
-
-        auto RootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(PrefabGuid.m_Instance.m_Value);
-        if (RootIt == GameMgr.m_PrefabMgr.m_PrefabList.end()) return;
-
-        // bRemoveRoot=false - a multi-entity ("Scene-Prefab") root must survive instancing so it comes
-        // back as a real, independent entity here; bRemoveRoot=true (the default) is for splicing a
-        // prefab's CHILDREN directly onto a caller-supplied existing entity, discarding the prefab's
-        // own root - not what this wants (this needs one standalone instantiated group, root included).
-        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(RootIt->second, /*bRemoveRoot=*/false);
-
-        // Registers the whole group (root + every descendant, each under a freshly minted id).
-        RegisterInstantiatedSubtree(GameMgr, Scene, Scene.m_Guid, NewRoot);
-
-        const auto RootId = Scene.m_RuntimeToLocal.at(NewRoot.m_Value);
-        if (TargetFolder != xecs::scene::invalid_folder_id_v)
-            ReparentEntityIntoFolder(Scene, RootId, TargetFolder);
-        AttachPrefabInstanceComponent(GameMgr, Scene, RootId, NewRoot, PrefabGuid, nullptr); // brand-new entity, can't already be selected
-    }
-
     // Recursively deletes Entity and (if it has children) its whole live descendant subtree, scrubbing
     // scene bookkeeping/folder membership for each - the "whole group" analog of a single-entity
     // delete action.
     void DeleteEntitySubtree(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, xecs::component::entity Entity, bool bRecordPrefabOverride = true) noexcept
     {
-        // Only the top-level delete records a hierarchy diff - recursive child deletes are covered
-        // by that one removed path (and would scramble MemberPath bookkeeping mid-teardown).
+        // A member of a prefab instance taken away: the instance's recipe removes it (computed from the live instance when it is saved), so the
+        // instance is written again. Only the top-level delete: the subtree goes with it.
         if (bRecordPrefabOverride)
-            RecordRemovedChildOverride(GameMgr, Scene, SceneGuid, Entity);
+            MarkContainingInstanceDirty(GameMgr, SceneGuid, Entity);
 
         auto& Ecs = xlioncore::Ecs(GameMgr);
 
@@ -115,6 +61,7 @@ namespace xscene
             const auto Id = It->second;
             Scene.m_RuntimeToLocal.erase(It);
             Scene.m_LocalToRuntime.erase(Id);
+            Scene.m_InstanceMembers.erase(Id);
             GameMgr.m_SceneMgr.MarkEntityDeleted(SceneGuid, Id);
             ReparentEntityIntoFolder(Scene, Id, xecs::scene::invalid_folder_id_v);
         }
@@ -251,141 +198,6 @@ namespace xscene
         return Root;
     }
 
-    // Step 2: given a resolved group root (a real, live entity - either the single dragged/clicked
-    // entity, an existing subtree's own root, or DetermineGroupRoot's synthetic one), creates the
-    // Prefab asset (at LibraryGUID/ParentGUID - the caller's own drop target) and converts the
-    // original live group into an instance of it, generalizing the single-entity "drag out becomes an
-    // instance" behavior.
-    xresource::full_guid CreatePrefabFromGroupRoot(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root) noexcept
-    {
-        // If Root already had a parent in the live scene (e.g. a single child entity that's part of
-        // some OTHER, unrelated hierarchy, or a whole existing subtree being grouped), that positional
-        // link is NOT part of what gets persisted (a prefab root never carries its own parent) -
-        // captured here so the freshly-instantiated root can be spliced back into the exact same
-        // position afterward, rather than unexpectedly falling out to scene-root.
-        xecs::component::entity OriginalParent;
-        if (auto* pRootParent = xlioncore::Ecs(GameMgr).ParentOf(Root))
-            OriginalParent = pRootParent->m_Value;
-
-        const auto RootId           = Scene.m_RuntimeToLocal.at(Root.m_Value);
-        const bool bRootWasSelected = pState && (pState->m_SelectedEntityId == RootId);
-        const auto StaleRootValue   = Root.m_Value; // Root's own OLD live handle - about to be deleted; only ever compared, never dereferenced, below
-
-        // Folder membership is keyed by RootId (a permanent_id, preserved across this whole
-        // conversion) rather than by live entity handle, so in principle it wouldn't need capturing -
-        // except DeleteEntitySubtree (below) explicitly scrubs it as part of deleting the OLD live
-        // root (ReparentEntityIntoFolder(..., invalid_folder_id_v)), since from ITS point of view the
-        // entity is simply being removed. Without capturing and restoring it here, RootId would render
-        // loose at scene root after re-registration instead of back in its original folder.
-        const auto OriginalFolderId = FindFolderContaining(Scene, RootId);
-
-        // A multi-select group gets a synthetic root with no name of its own.
-        std::string Name = "Prefab Root";
-        if (auto* pName = FindEntityName(Scene, RootId)) Name = *pName;
-
-        const xresource::full_guid NewGuid   = AssetMgr.NewAsset(LibraryGUID, xresource::full_guid{ {}, xecs::prefab::type_guid_v }, ParentGUID, Name);
-        const xecs::prefab::guid   PrefabGuid = NewGuid;
-
-        std::printf("[MakePrefab] CreatePrefabFromGroupRoot: RootId=%u Name='%s' - cloning into prefab\n", RootId, Name.c_str());
-        std::fflush(stdout);
-
-        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Root, PrefabGuid);
-        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
-        {
-            xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
-            return {};
-        }
-
-        // Convert the original live group into an instance of the new prefab: delete the original
-        // root+descendants, instantiate a fresh copy, splice it back into whatever OriginalParent
-        // held, then register it under RootId's preserved permanent_id (so scene bookkeeping/
-        // selection keep referencing "the same" entity) - every child gets a freshly minted id
-        // instead (they're new scene entities, never existed as "an instance" before).
-        DeleteEntitySubtree(GameMgr, Scene, SceneGuid, Root);
-
-        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), /*bRemoveRoot=*/false);
-        std::printf("[MakePrefab] CreatePrefabFromGroupRoot: instantiated fresh copy, NewRoot.isValid=%d NewRoot.isZombie=%d\n", NewRoot.isValid(), NewRoot.isZombie());
-        std::fflush(stdout);
-
-        if (OriginalParent.isValid())
-        {
-            auto& Ecs = xlioncore::Ecs(GameMgr);
-            NewRoot = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, NewRoot);
-            Ecs.ParentOf(NewRoot)->m_Value = OriginalParent;
-
-            if (auto* pOriginalChildren = Ecs.ChildrenOf(OriginalParent))
-            {
-                auto& OPChildren = pOriginalChildren->m_List;
-                for (auto& C : OPChildren)
-                    if (C.m_Value == StaleRootValue) { C = NewRoot; break; }
-            }
-        }
-
-        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
-        {
-            auto ChildEntities = pNewChildren->m_List;
-            std::printf("[MakePrefab] CreatePrefabFromGroupRoot: NewRoot has %zu child(ren) to register\n", ChildEntities.size());
-            std::fflush(stdout);
-            for (auto Child : ChildEntities)
-                RegisterInstantiatedSubtree(GameMgr, Scene, SceneGuid, Child);
-        }
-
-        Scene.m_LocalToRuntime[RootId]           = NewRoot;
-        Scene.m_RuntimeToLocal[NewRoot.m_Value]  = RootId;
-
-        // Restore RootId's folder membership, scrubbed by DeleteEntitySubtree above - but only when
-        // the root did NOT get a parent restored (an entity with a parent is never ALSO placed via
-        // folder membership - the parent becomes the folder, per this whole tree's own convention).
-        if (false == OriginalParent.isValid())
-            ReparentEntityIntoFolder(Scene, RootId, OriginalFolderId);
-
-        AttachPrefabInstanceComponent(GameMgr, Scene, RootId, NewRoot, PrefabGuid, pState);
-
-        // RootId lives on as the new instance: cancel the delete DeleteEntitySubtree recorded for it,
-        // or SaveScene (where Deleted wins over Dirty) removes the root's entity file.
-        Scene.m_PendingChanges[RootId].m_Deleted -= 1;
-        GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, RootId);
-
-        if (pState)
-        {
-            pState->m_MultiSelectedEntityIds.clear();
-            pState->m_MultiSelectOrder.clear();
-            if (bRootWasSelected)
-            {
-                if (auto It = Scene.m_LocalToRuntime.find(RootId); It != Scene.m_LocalToRuntime.end())
-                {
-                    pState->m_SelectedEntity        = It->second;
-                    pState->m_SelectedEntityScene   = SceneGuid;
-                    pState->m_bEntityInspectorDirty = true;
-                }
-            }
-            else if (pState->m_SelectedEntityScene == SceneGuid && pState->m_SelectedEntityId != xecs::scene::invalid_permanent_id_v)
-            {
-                // The previously-selected entity might have been one of the OTHER group members (a
-                // non-root one). Non-root members get deleted and replaced with a FRESH entity under
-                // a FRESH id (RegisterInstantiatedSubtree), so there's no principled "same identity"
-                // to preserve for them the way the root's own preserved RootId gives one - if the
-                // id/handle pairing no longer matches what's actually live, the safe move is to clear
-                // the selection rather than leave pState->m_SelectedEntity holding a stale handle into
-                // an entity that DeleteEntitySubtree already destroyed (a stale handle used later
-                // trips xECS's own generation/validation assert).
-                auto It = Scene.m_LocalToRuntime.find(pState->m_SelectedEntityId);
-                if (It == Scene.m_LocalToRuntime.end() || It->second.m_Value != pState->m_SelectedEntity.m_Value)
-                {
-                    pState->m_SelectedEntityId      = xecs::scene::invalid_permanent_id_v;
-                    pState->m_SelectedEntity        = {};
-                    pState->m_SelectedEntityScene   = {};
-                    pState->m_bEntityInspectorDirty = true;
-                }
-            }
-        }
-
-        std::printf("[MakePrefab] CreatePrefabFromGroupRoot: done, RootId=%u still resident=%d\n", RootId, Scene.m_LocalToRuntime.contains(RootId));
-        std::fflush(stdout);
-
-        return NewGuid;
-    }
-
     // Payload for dragging a scene entity onto an asset-browser folder to create a Prefab from it -
     // registered against xresource_editor::external_drop_registration_base (see xresource_editor_asset_browser.h) so the browser
     // can accept it without knowing anything about xECS/scenes. Carries the scene guid + the entity's
@@ -405,47 +217,6 @@ namespace xscene
     // cycle with this file), so the drop path calls through this hook instead of CreatePrefab* directly.
     using make_prefab_drop_fn_t = xresource::full_guid(*)(xresource_editor::library_mgr&, xresource_editor::library::guid, xresource::full_guid, const entity_drag_payload_t&) noexcept;
     inline make_prefab_drop_fn_t g_MakePrefabDropHandler = nullptr;
-
-    // Unity's own "Prefab Variant" fast path: dragging a SINGLE existing prefab instance (no other
-    // entity in the active selection) into the asset browser creates a variant WITHOUT touching the
-    // scene object's own live identity - Unity re-points that same GameObject's prefab connection at
-    // the new variant rather than deleting and recreating it. Deliberately narrower than
-    // CreatePrefabFromGroupRoot (which always deletes+recreates): a multi-select group has no single
-    // existing identity to preserve in the first place (a brand-new synthetic root is minted either
-    // way), and a PLAIN entity (never instanced) has no existing prefab connection to re-point - both
-    // of those keep going through the general path unchanged.
-    xresource::full_guid CreatePrefabVariantFromInstance(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id Id, xecs::component::entity Entity, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID) noexcept
-    {
-        std::string Name = "Prefab";
-        if (auto* pName = FindEntityName(Scene, Id)) Name = *pName;
-
-        const xresource::full_guid NewGuid   = AssetMgr.NewAsset(LibraryGUID, xresource::full_guid{ {}, xecs::prefab::type_guid_v }, ParentGUID, Name);
-        const xecs::prefab::guid   PrefabGuid = NewGuid;
-
-        std::printf("[MakePrefab] CreatePrefabVariantFromInstance: Id=%u Name='%s' - capturing into a variant, live entity untouched\n", Id, Name.c_str());
-        std::fflush(stdout);
-
-        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Entity, PrefabGuid);
-        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
-        {
-            xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
-            return {};
-        }
-
-        // Re-point the SAME live entity's own bookkeeping at the new variant - no deletion, no fresh
-        // instantiation needed: this entity's current data IS already exactly what a fresh instance of
-        // the new variant looks like, since it's what the variant was just captured FROM. Overrides are
-        // cleared (matching AttachPrefabInstanceComponent's own reasoning) since they were computed
-        // relative to whatever this entity pointed at BEFORE - a save recomputes them fresh regardless.
-        auto& PI = *xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(GameMgr), Entity);
-        PI.m_PrefabInstance = PrefabGuid;
-        PI.m_lComponents.clear();
-        PI.m_ComponentDiffs.clear();
-        PI.m_HierarchyDiffs.clear();
-        GameMgr.m_SceneMgr.MarkEntityDirty(Scene.m_Guid, Id);
-
-        return NewGuid;
-    }
 
     struct entity_to_prefab_drop final : xresource_editor::external_drop_registration_base
     {

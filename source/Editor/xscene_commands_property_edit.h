@@ -158,7 +158,7 @@ namespace xscene::commands
         for (auto& C : Ctx.m_pPI->m_lComponents)
         {
             if (C.m_ComponentTypeGuid != Info.m_Guid.m_Value) continue;
-            if (!std::ranges::equal(C.m_MemberPath, Ctx.m_MemberPath)) continue;
+            if (!std::ranges::equal(C.m_Member, Ctx.m_Member)) continue;
             for (auto& O : C.m_PropertyOverrides)
                 if (O.m_PropertyName == Path) return true;
             return false;
@@ -190,7 +190,7 @@ namespace xscene::commands
             }
         }
 
-        auto& CompOverride = xscene::FindOrCreateOverrideEntry(*Ctx.m_pPI, Target.m_pInfo->m_Guid.m_Value, Ctx.m_MemberPath);
+        auto& CompOverride = xscene::FindOrCreateOverrideEntry(*Ctx.m_pPI, Target.m_pInfo->m_Guid.m_Value, Ctx.m_Member);
         for (auto& O : CompOverride.m_PropertyOverrides)
         {
             if (O.m_PropertyName == Path)
@@ -220,13 +220,13 @@ namespace xscene::commands
         for (auto& C : Ctx.m_pPI->m_lComponents)
         {
             if (C.m_ComponentTypeGuid != Target.m_pInfo->m_Guid.m_Value) continue;
-            if (!std::ranges::equal(C.m_MemberPath, Ctx.m_MemberPath)) continue;
+            if (!std::ranges::equal(C.m_Member, Ctx.m_Member)) continue;
             std::erase_if(C.m_PropertyOverrides, [&](auto& O) noexcept { return O.m_PropertyName == Path; });
             if (C.m_PropertyOverrides.empty())
             {
-                auto& MemberPath = Ctx.m_MemberPath;
+                auto& MemberPath = Ctx.m_Member;
                 const auto ComponentGuidValue = Target.m_pInfo->m_Guid.m_Value;
-                std::erase_if(Ctx.m_pPI->m_lComponents, [&](auto& CC) noexcept { return CC.m_ComponentTypeGuid == ComponentGuidValue && std::ranges::equal(CC.m_MemberPath, MemberPath); });
+                std::erase_if(Ctx.m_pPI->m_lComponents, [&](auto& CC) noexcept { return CC.m_ComponentTypeGuid == ComponentGuidValue && std::ranges::equal(CC.m_Member, MemberPath); });
             }
             break;
         }
@@ -283,7 +283,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",                       true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",               true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",               true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
             m_hPath      = m_Parser.addOption("Path",      "Property path",                                   true, 1);
         }
@@ -317,7 +317,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",              true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",      true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",      true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component name (Transform) or type guid, 16 hex digits", true, 1);
             m_hPath      = m_Parser.addOption("Path",      "Property path",                  true, 1);
             m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits (default: the property's own)", false, 1);
@@ -383,7 +383,7 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             const std::uint64_t Scene    = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
             std::uint32_t       TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
             const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
@@ -427,7 +427,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;     File.Read(Scene);
-            std::uint32_t Id = 0;        File.Read(Id);
+            xecs::scene::permanent_id Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
             std::uint32_t TypeGuid = 0;  File.Read(TypeGuid);
             const std::string Path   = xeditor::ReadString(File);
@@ -470,7 +470,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",              true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",      true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",      true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits",     true, 1);
             m_hPath      = m_Parser.addOption("Path",      "Property path",                  true, 1);
             m_hTypeGuid  = m_Parser.addOption("TypeGuid",  "Property value type guid, 8 hex digits", true, 1);
@@ -515,7 +515,7 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             const std::uint64_t Scene     = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
             const std::uint32_t TypeGuid  = std::holds_alternative<xerr>(TypeArg) ? 0 : static_cast<std::uint32_t>(std::strtoul(std::get<std::string>(TypeArg).c_str(), nullptr, 16));
             const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
@@ -532,7 +532,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;     File.Read(Scene);
-            std::uint32_t Id = 0;        File.Read(Id);
+            xecs::scene::permanent_id Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
             std::uint32_t TypeGuid = 0;  File.Read(TypeGuid);
             const std::string Path   = xeditor::ReadString(File);
@@ -565,7 +565,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",          true, 1);
-            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 hex digits",  true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",  true, 1);
             m_hComponent = m_Parser.addOption("Component", "Component type guid, 16 hex digits", true, 1);
             m_hLabel     = m_Parser.addOption("Label",     "What the edit did",          true, 1);
             m_hBefore    = m_Parser.addOption("Before",    "State before",               true, 1);
@@ -620,7 +620,7 @@ namespace xscene::commands
             auto BeforeArg = m_Parser.getOptionArgAs<std::string>(m_hBefore, 0);
 
             File.Write(std::holds_alternative<xerr>(SceneArg) ? std::uint64_t{0} : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16));
-            File.Write(std::holds_alternative<xerr>(IdArg)    ? std::uint32_t{0} : static_cast<std::uint32_t>(ParseEntityId(std::get<std::string>(IdArg))));
+            File.Write(std::holds_alternative<xerr>(IdArg)    ? xecs::scene::permanent_id{0} : ParseEntityId(std::get<std::string>(IdArg)));
             File.Write(std::holds_alternative<xerr>(CompArg)  ? std::uint64_t{0} : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16));
             xeditor::WriteString(File, std::holds_alternative<xerr>(BeforeArg) ? std::string{} : std::get<std::string>(BeforeArg));
         }
@@ -628,7 +628,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;     File.Read(Scene);
-            std::uint32_t Id = 0;        File.Read(Id);
+            xecs::scene::permanent_id Id = 0;        File.Read(Id);
             std::uint64_t Component = 0; File.Read(Component);
             const std::string Before = xeditor::ReadString(File);
             Apply(xecs::scene::guid{ .m_Instance = { Scene } }, static_cast<xecs::scene::permanent_id>(Id), Component, Before);

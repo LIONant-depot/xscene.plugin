@@ -165,7 +165,7 @@ namespace xscene
                 for (auto& C : Ctx.m_pPI->m_lComponents)
                 {
                     if (C.m_ComponentTypeGuid != It->second->m_Guid.m_Value) continue;
-                    if (std::ranges::equal(C.m_MemberPath, Ctx.m_MemberPath) == false) continue;
+                    if (std::ranges::equal(C.m_Member, Ctx.m_Member) == false) continue;
                     for (auto& O : C.m_PropertyOverrides)
                         if (O.m_PropertyName == Path) { bOut = true; return; }
                 }
@@ -191,13 +191,8 @@ namespace xscene
                     return;
                 }
 
-                auto RootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(Ctx.m_pPI->m_PrefabInstance.m_Instance.m_Value);
-                if (RootIt == GameMgr.m_PrefabMgr.m_PrefabList.end()) return;
-
-                // Same MemberPath, walked from the PREFAB's own root instead of the placed instance's
-                // root - reaches the corresponding source member (see
-                // prefab_component_override::m_MemberPath).
-                const auto BaseEntity = xlioncore::Ecs(GameMgr).ResolveMemberPath(RootIt->second, Ctx.m_MemberPath);
+                // The prefab's member at the same address (its id in the prefab: see xecs::editor::member_address).
+                const auto BaseEntity = xlioncore::Ecs(GameMgr).ResolvePrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
                 if (BaseEntity.isValid() == false) return;
 
                 // DATA components live in the entity's own pool row, SHARE components on the family's share

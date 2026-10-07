@@ -85,11 +85,11 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene      = m_Parser.addOption("Scene",      "Scene guid of the entity holding the reference, 16 hex digits",  true, 1);
-            m_hId         = m_Parser.addOption("Id",         "Entity permanent_id holding the reference, 8 hex digits",       true, 1);
+            m_hId         = m_Parser.addOption("Id",         "Entity permanent_id holding the reference, 8 or 16 hex digits",       true, 1);
             m_hComponent  = m_Parser.addOption("Component",  "Component type guid, 16 hex digits",                            true, 1);
             m_hPath       = m_Parser.addOption("Path",       "Property path",                                 true, 1);
             m_hAfterScene = m_Parser.addOption("AfterScene", "Target entity's scene guid, 16 hex digits (0 = clear)",         true, 1);
-            m_hAfterId    = m_Parser.addOption("AfterId",    "Target entity's permanent_id, 8 hex digits (0 = clear)",        true, 1);
+            m_hAfterId    = m_Parser.addOption("AfterId",    "Target entity's permanent_id, 8 or 16 hex digits (0 = clear)",        true, 1);
         }
 
         std::string Redo() noexcept override
@@ -140,7 +140,7 @@ namespace xscene::commands
             auto PathArg  = m_Parser.getOptionArgAs<std::string>(m_hPath, 0);
 
             const std::uint64_t Scene     = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id        = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Component = std::holds_alternative<xerr>(CompArg) ? 0 : std::strtoull(std::get<std::string>(CompArg).c_str(), nullptr, 16);
             const std::string   Path      = std::holds_alternative<xerr>(PathArg) ? std::string{} : std::get<std::string>(PathArg);
 
@@ -152,7 +152,7 @@ namespace xscene::commands
             // already existed for this Path, same "restore vs remove entirely" distinction
             // set_property_cmd's own BackupCurrenState makes (HasPropertyOverride's own comment).
             std::uint64_t BeforeScene = 0;
-            std::uint32_t BeforeId    = 0;
+            xecs::scene::permanent_id BeforeId    = 0;
             bool          bHadOverride = false;
             if (const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, static_cast<xecs::scene::permanent_id>(Id), Component); Target.m_pInfo)
             {
@@ -189,11 +189,11 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;       File.Read(Scene);
-            std::uint32_t Id = 0;          File.Read(Id);
+            xecs::scene::permanent_id Id = 0;          File.Read(Id);
             std::uint64_t Component = 0;   File.Read(Component);
             const std::string Path = xeditor::ReadString(File);
             std::uint64_t BeforeScene = 0; File.Read(BeforeScene);
-            std::uint32_t BeforeId = 0;    File.Read(BeforeId);
+            xecs::scene::permanent_id BeforeId = 0;    File.Read(BeforeId);
             bool bHadOverride = false;     File.Read(bHadOverride);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };

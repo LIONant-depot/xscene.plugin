@@ -35,24 +35,52 @@
 
 namespace xscene::commands
 {
-    // Identical to xscene::CreatePrefabFromGroupRoot (xscene_prefab_authoring.h) except the new Prefab
-    // asset is created under an EXPLICIT, caller-pre-minted guid instead of an auto-generated one -
-    // same "-Asset is pre-minted by the caller" convention CreateAsset/InstantiatePrefab already
-    // established, needed so make_prefab_cmd::Redo stays deterministic/re-runnable across an
-    // Undo/Redo cycle (the original function's own auto-generation would mint a DIFFERENT asset guid
-    // on every call, leaking an abandoned, never-cleaned-up asset in the Trash on every Redo after an
-    // Undo). Body is otherwise a verbatim copy - see that function's own comments for the full
-    // reasoning behind each step, not repeated here.
-    inline xresource::full_guid CreatePrefabFromGroupRootWithAssetGuid(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root, xresource::full_guid ExplicitPrefabAssetGuid) noexcept
+    // The recipes of the prefab instances in Root's subtree (Root included), refreshed from what their members are now: a clone into a prefab
+    // takes an instance as one opaque member with its recipe (its members are not cloned), so the recipe must say everything first.
+    inline void RefreshRecipesInSubtree(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::component::entity Root) noexcept
     {
+        auto& Ecs = xlioncore::Ecs(GameMgr);
+        std::function<void(xecs::component::entity)> Walk = [&](xecs::component::entity E) noexcept
+        {
+            auto It = Scene.m_RuntimeToLocal.find(E.m_Value);
+            if (It == Scene.m_RuntimeToLocal.end()) return;
+            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, E) && !Scene.m_InstanceMembers.contains(It->second))
+            {
+                Ecs.RefreshPrefabRecipe(Scene, It->second);
+                return;                                 // its members are its recipe's
+            }
+            if (auto* pKids = Ecs.ChildrenOf(E))
+            {
+                auto Kids = pKids->m_List;
+                for (auto K : Kids) Walk(K);
+            }
+        };
+        Walk(Root);
+    }
+
+    // Makes a Prefab asset (under an EXPLICIT, caller-pre-minted guid: same "-Asset is pre-minted by the caller" convention
+    // CreateAsset/InstantiatePrefab established, so make_prefab_cmd::Redo stays deterministic across an Undo/Redo cycle) from Root's subtree,
+    // and turns that subtree into an instance of it: the subtree is deleted and an instance placed under Root's id, in Root's place (its parent,
+    // at the same index, or its folder). The instance's members get ids derived from Root's id (prefabs_plan.md, phase 3). A reference a member
+    // held to an entity outside the group cannot be kept by the prefab (it is null there): the instance keeps it as an override (Unity does the
+    // same) - OutOutside lists them for the caller, which sets them (make_prefab_cmd::Redo).
+    inline xresource::full_guid CreatePrefabFromGroupRootWithAssetGuid(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, scene_state* pState, xresource_editor::library_mgr& AssetMgr, xresource_editor::library::guid LibraryGUID, xresource::full_guid ParentGUID, xecs::component::entity Root, xresource::full_guid ExplicitPrefabAssetGuid, std::vector<xecs::prefab::outside_reference>& OutOutside) noexcept
+    {
+        (void)AssetMgr;
+        auto& Ecs = xlioncore::Ecs(GameMgr);
+
         xecs::component::entity OriginalParent;
-        if (auto* pRootParent = xlioncore::Ecs(GameMgr).ParentOf(Root))
+        std::size_t             OriginalIndex = 0;
+        if (auto* pRootParent = Ecs.ParentOf(Root))
+        {
             OriginalParent = pRootParent->m_Value;
+            if (auto* pSiblings = OriginalParent.isValid() ? Ecs.ChildrenOf(OriginalParent) : nullptr)
+                if (auto It = std::ranges::find(pSiblings->m_List, Root.m_Value, &xecs::component::entity::m_Value); It != pSiblings->m_List.end())
+                    OriginalIndex = static_cast<std::size_t>(It - pSiblings->m_List.begin());
+        }
 
         const auto RootId           = Scene.m_RuntimeToLocal.at(Root.m_Value);
         const bool bRootWasSelected = pState && (pState->m_SelectedEntityId == RootId);
-        const auto StaleRootValue   = Root.m_Value;
-
         const auto OriginalFolderId = xscene::FindFolderContaining(Scene, RootId);
 
         std::string Name = "Prefab";
@@ -60,13 +88,14 @@ namespace xscene::commands
 
         // CreateOrRestoreAsset (xresource_editor_commands_assets.h), not a plain NewAsset call - a re-Redo
         // (after an Undo trashed this exact prefab asset guid) must restore-from-trash instead of
-        // calling NewAsset again, same reasoning/bug CreateAsset's own Redo already had to solve -
-        // confirmed live this hits the identical failure mode when reused verbatim here.
+        // calling NewAsset again, same reasoning/bug CreateAsset's own Redo already had to solve.
         xresource_editor::commands::CreateOrRestoreAsset(LibraryGUID, ExplicitPrefabAssetGuid, ParentGUID, Name);
         const xecs::prefab::guid PrefabGuid = ExplicitPrefabAssetGuid;
 
-        xlioncore::Ecs(GameMgr).CreatePrefabFromEntity(Root, PrefabGuid);
-        if (auto Err = xlioncore::Ecs(GameMgr).SavePrefab(PrefabGuid); Err)
+        RefreshRecipesInSubtree(GameMgr, Scene, Root);
+        std::unordered_map<std::uint64_t, std::uint64_t> MemberIds;          // each entity of the group: its id in the prefab
+        Ecs.CreatePrefabFromEntity(Root, PrefabGuid, &OutOutside, &MemberIds);
+        if (auto Err = Ecs.SavePrefab(PrefabGuid); Err)
         {
             xeditor::NotifyToast(std::format("Failed to save new Prefab: {}", Err.getMessage()));
             return {};
@@ -74,40 +103,58 @@ namespace xscene::commands
 
         xscene::DeleteEntitySubtree(GameMgr, Scene, SceneGuid, Root);
 
-        auto NewRoot = xlioncore::Ecs(GameMgr).CreatePrefabInstance(GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value), /*bRemoveRoot=*/false);
-
+        auto NewRoot = Ecs.InstantiatePrefabInScene(Scene, PrefabGuid, RootId, OriginalParent);
+        if (NewRoot.isValid() == false)
+        {
+            xeditor::NotifyToast("MakePrefab: the new prefab could not be instantiated");
+            return {};
+        }
         if (OriginalParent.isValid())
         {
-            auto& Ecs = xlioncore::Ecs(GameMgr);
-            NewRoot = xlioncore::AddComponentsOf<xecs::component::parent>(Ecs, NewRoot);
-            Ecs.ParentOf(NewRoot)->m_Value = OriginalParent;
-
-            if (auto* pOriginalChildren = Ecs.ChildrenOf(OriginalParent))
+            // back to the place the group had among its siblings (the instance was appended)
+            if (auto* pSiblings = Ecs.ChildrenOf(Ecs.ParentOf(NewRoot)->m_Value))
             {
-                auto& OPChildren = pOriginalChildren->m_List;
-                for (auto& C : OPChildren)
-                    if (C.m_Value == StaleRootValue) { C = NewRoot; break; }
+                auto& L = pSiblings->m_List;
+                std::erase_if(L, [&](auto& E) noexcept { return E.m_Value == NewRoot.m_Value; });
+                L.insert(L.begin() + static_cast<std::ptrdiff_t>(std::min(OriginalIndex, L.size())), NewRoot);
+            }
+        }
+        else xscene::ReparentEntityIntoFolder(Scene, RootId, OriginalFolderId);
+
+        // What referenced an entity of the group now references the member that entity became (the root keeps its id; the others' ids are
+        // derived from it and their id in the prefab).
+        {
+            std::unordered_map<std::uint64_t, xecs::component::entity> Moved;
+            const auto PRoot = GameMgr.m_PrefabMgr.m_PrefabList.at(PrefabGuid.m_Instance.m_Value);
+            const auto RootLocal = GameMgr.m_PrefabMgr.m_PrefabGroups.at(PrefabGuid.m_Instance.m_Value).m_RuntimeToLocal.at(PRoot.m_Value);
+            for (auto& [SourceValue, Local] : MemberIds)
+            {
+                xecs::editor::member_address A;
+                if (Local != RootLocal) A.push_back(Local);
+                if (auto It = Scene.m_LocalToRuntime.find(xecs::scene::DeriveMemberId(RootId, A)); It != Scene.m_LocalToRuntime.end()) Moved[SourceValue] = It->second;
+            }
+            for (auto& pOther : GameMgr.m_SceneMgr.m_SceneInstances)
+            {
+                std::vector<std::pair<xecs::scene::permanent_id, xecs::component::entity>> Entities(pOther->m_LocalToRuntime.begin(), pOther->m_LocalToRuntime.end());
+                for (auto& [Id, E] : Entities)
+                {
+                    if (pOther->m_InstanceMembers.contains(Id) || !Ecs.IsAlive(E)) continue;
+                    bool bChanged = false;
+                    Ecs.RemapLoadedEntityReferences(E, [&](std::int64_t V) noexcept
+                    {
+                        xecs::component::entity R; R.m_Value = static_cast<std::uint64_t>(V);
+                        if (auto It = Moved.find(R.m_Value); It != Moved.end()) { bChanged = true; return It->second; }
+                        return R;
+                    });
+                    if (bChanged) GameMgr.m_SceneMgr.MarkEntityDirty(pOther->m_Guid, Id);
+                }
             }
         }
 
-        if (auto* pNewChildren = xlioncore::Ecs(GameMgr).ChildrenOf(NewRoot))
-        {
-            auto ChildEntities = pNewChildren->m_List;
-            for (auto Child : ChildEntities)
-                xscene::RegisterInstantiatedSubtree(GameMgr, Scene, SceneGuid, Child);
-        }
-
-        Scene.m_LocalToRuntime[RootId]           = NewRoot;
-        Scene.m_RuntimeToLocal[NewRoot.m_Value]  = RootId;
-
-        if (false == OriginalParent.isValid())
-            xscene::ReparentEntityIntoFolder(Scene, RootId, OriginalFolderId);
-
-        xscene::AttachPrefabInstanceComponent(GameMgr, Scene, RootId, NewRoot, PrefabGuid, pState);
-
-        // RootId lives on as the new instance: cancel the delete DeleteEntitySubtree recorded for it,
-        // or SaveScene (where Deleted wins over Dirty) removes the root's entity file.
+        // RootId lives on as the new instance: cancel the delete DeleteEntitySubtree recorded for it (SaveScene: Deleted wins over Dirty, which
+        // would remove the root's file) and the New the placement recorded (its file exists).
         Scene.m_PendingChanges[RootId].m_Deleted -= 1;
+        Scene.m_PendingChanges[RootId].m_New     -= 1;
         GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, RootId);
 
         if (pState)
@@ -116,12 +163,9 @@ namespace xscene::commands
             pState->m_MultiSelectOrder.clear();
             if (bRootWasSelected)
             {
-                if (auto It = Scene.m_LocalToRuntime.find(RootId); It != Scene.m_LocalToRuntime.end())
-                {
-                    pState->m_SelectedEntity        = It->second;
-                    pState->m_SelectedEntityScene   = SceneGuid;
-                    pState->m_bEntityInspectorDirty = true;
-                }
+                pState->m_SelectedEntity        = NewRoot;
+                pState->m_SelectedEntityScene   = SceneGuid;
+                pState->m_bEntityInspectorDirty = true;
             }
             else if (pState->m_SelectedEntityScene == SceneGuid && pState->m_SelectedEntityId != xecs::scene::invalid_permanent_id_v)
             {
@@ -137,6 +181,47 @@ namespace xscene::commands
         }
 
         return ExplicitPrefabAssetGuid;
+    }
+
+    // The references the group held outside itself (CreatePrefabFromGroupRootWithAssetGuid), kept by the instance: set on its members and
+    // recorded as overrides of the instance (the prefab has them null).
+    inline void KeepOutsideReferencesAsOverrides(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id RootId, xecs::prefab::guid PrefabGuid, const std::vector<xecs::prefab::outside_reference>& Outside) noexcept
+    {
+        if (Outside.empty()) return;
+        auto& Ecs    = xlioncore::Ecs(GameMgr);
+        auto  RootIt = Scene.m_LocalToRuntime.find(RootId);
+        if (RootIt == Scene.m_LocalToRuntime.end()) return;
+        auto GroupIt = GameMgr.m_PrefabMgr.m_PrefabGroups.find(PrefabGuid.m_Instance.m_Value);
+        auto PRootIt = GameMgr.m_PrefabMgr.m_PrefabList.find(PrefabGuid.m_Instance.m_Value);
+        if (GroupIt == GameMgr.m_PrefabMgr.m_PrefabGroups.end() || PRootIt == GameMgr.m_PrefabMgr.m_PrefabList.end()) return;
+        const auto RootLocal = GroupIt->second.m_RuntimeToLocal.at(PRootIt->second.m_Value);
+
+        for (auto& O : Outside)
+        {
+            xecs::editor::member_address Member;
+            if (O.m_Member != RootLocal) Member.push_back(O.m_Member);
+            auto MemberIt = Scene.m_LocalToRuntime.find(xecs::scene::DeriveMemberId(RootId, Member));
+            if (MemberIt == Scene.m_LocalToRuntime.end() || !Ecs.IsAlive(O.m_Target)) continue;
+
+            const xecs::component::type::info* pInfo = nullptr;
+            auto* pData = Ecs.ResolveComponent(MemberIt->second, xecs::component::type::guid{ O.m_Component }, pInfo);
+            if (pData == nullptr || pInfo == nullptr || pInfo->m_pPropertyTable == nullptr) continue;
+
+            xproperty::any Value;
+            Value.set<xecs::component::entity>(O.m_Target);
+            std::string                  SetError;
+            xproperty::settings::context Context;
+            xproperty::sprop::setProperty(SetError, pData, *pInfo->m_pPropertyTable, xproperty::sprop::container::prop{ O.m_Path, Value }, Context);
+
+            auto* pPI = xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, RootIt->second);
+            if (pPI == nullptr) continue;
+            std::array<char, 256> Buffer{};
+            const auto Len = FormatPropertyValue(Buffer, Value);
+            auto& Entry = xscene::FindOrCreateOverrideEntry(*pPI, O.m_Component, Member);
+            std::erase_if(Entry.m_PropertyOverrides, [&](auto& P) noexcept { return P.m_PropertyName == O.m_Path; });
+            Entry.m_PropertyOverrides.push_back({ .m_PropertyName = O.m_Path, .m_PropertyValueAsString = std::string(Buffer.data(), Len > 0 ? static_cast<std::size_t>(Len) : 0) });
+        }
+        GameMgr.m_SceneMgr.MarkEntityDirty(Scene.m_Guid, RootId);
     }
 
 
@@ -190,7 +275,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene   = m_Parser.addOption("Scene",   "Scene guid, 16 hex digits",                                   true, 1);
-            m_hId      = m_Parser.addOption("Id",      "Root entity permanent_id, 8 hex digits",                      true, 1);
+            m_hId      = m_Parser.addOption("Id",      "Root entity permanent_id, 8 or 16 hex digits",                      true, 1);
             m_hLibrary = m_Parser.addOption("Library", "Asset library guid, 16 hex digits",                           true, 1);
             m_hAsset   = m_Parser.addOption("Asset",   "New Prefab asset's guid, 32 hex digits, pre-minted by the caller", true, 1);
             m_hParent  = m_Parser.addOption("Parent",  "Parent asset guid (where the new Prefab is filed), 32 hex digits", true, 1);
@@ -214,10 +299,13 @@ namespace xscene::commands
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene || !pScene->m_LocalToRuntime.contains(Id)) return "MakePrefab: target not found";
+            if (pScene->m_InstanceMembers.contains(Id)) return "MakePrefab: the entity is a member of a prefab instance (its prefab owns it: make the prefab from the instance)";
 
             const auto Root = pScene->m_LocalToRuntime.at(Id);
-            const auto Result = CreatePrefabFromGroupRootWithAssetGuid(World(), *pScene, SceneGuid, &State(), xresource_editor::g_LibMgr, LibraryGuid, ParentGuid, Root, AssetGuid);
+            std::vector<xecs::prefab::outside_reference> Outside;
+            const auto Result = CreatePrefabFromGroupRootWithAssetGuid(World(), *pScene, SceneGuid, &State(), xresource_editor::g_LibMgr, LibraryGuid, ParentGuid, Root, AssetGuid, Outside);
             if (Result.empty()) return "MakePrefab: failed";
+            KeepOutsideReferencesAsOverrides(World(), *pScene, Id, xecs::prefab::guid{ AssetGuid }, Outside);
             return {};
         }
 
@@ -229,7 +317,7 @@ namespace xscene::commands
             auto AssetArg   = m_Parser.getOptionArgAs<std::string>(m_hAsset, 0);
 
             const std::uint64_t Scene   = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id      = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id      = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Library = std::holds_alternative<xerr>(LibraryArg) ? 0 : std::strtoull(std::get<std::string>(LibraryArg).c_str(), nullptr, 16);
 
             File.Write(Scene);
@@ -245,7 +333,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;   File.Read(Scene);
-            std::uint32_t Id = 0;      File.Read(Id);
+            xecs::scene::permanent_id Id = 0;      File.Read(Id);
             std::uint64_t Library = 0; File.Read(Library);
             const std::string Asset = xeditor::ReadString(File);
 
@@ -287,7 +375,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene   = m_Parser.addOption("Scene",   "Scene guid, 16 hex digits",                                   true, 1);
-            m_hId      = m_Parser.addOption("Id",      "Entity permanent_id, 8 hex digits",                           true, 1);
+            m_hId      = m_Parser.addOption("Id",      "Entity permanent_id, 8 or 16 hex digits",                           true, 1);
             m_hLibrary = m_Parser.addOption("Library", "Asset library guid, 16 hex digits",                           true, 1);
             m_hAsset   = m_Parser.addOption("Asset",   "New Prefab asset's guid, 32 hex digits, pre-minted by the caller", true, 1);
             m_hParent  = m_Parser.addOption("Parent",  "Parent asset guid (where the new Prefab is filed), 32 hex digits", true, 1);
@@ -315,6 +403,10 @@ namespace xscene::commands
 
             auto* pPrefabInstance = xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
             if (!pPrefabInstance) return "MakePrefabVariant: entity is not a prefab instance";
+            if (pScene->m_InstanceMembers.contains(Id)) return "MakePrefabVariant: the entity is a member of another prefab instance";
+
+            // what the instance's members do differently is in its recipe before the variant captures it
+            xlioncore::Ecs(World()).RefreshPrefabRecipe(*pScene, Id);
 
             std::string Name = "Prefab";
             if (auto* pName = xscene::FindEntityName(*pScene, Id)) Name = *pName;
@@ -322,15 +414,18 @@ namespace xscene::commands
             xresource_editor::commands::CreateOrRestoreAsset(LibraryGuid, AssetGuid, ParentGuid, Name);
             const xecs::prefab::guid PrefabGuid = AssetGuid;
 
-            xlioncore::Ecs(World()).CreatePrefabFromEntity(Entity, PrefabGuid);
+            xlioncore::Ecs(World()).CreatePrefabFromEntity(Entity, PrefabGuid, nullptr, nullptr);
             if (auto Err = xlioncore::Ecs(World()).SavePrefab(PrefabGuid); Err)
                 return std::format("MakePrefabVariant: {}", Err.getMessage());
 
-            // the pools may have moved while the prefab was made: resolved again
+            // the pools may have moved while the prefab was made: resolved again. The instance is now one of the variant, which holds what it did
+            // differently: its own recipe is empty (its members keep their addresses: a variant's root adds no element to them)
             auto& PI = *xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(World()), Entity);
             PI.m_PrefabInstance = PrefabGuid;
             PI.m_lComponents.clear();
             PI.m_ComponentDiffs.clear();
+            PI.m_HierarchyDiffs.clear();
+            PI.m_Format = xecs::editor::prefab_instance::recipe_format_v;
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
             return {};
         }
@@ -343,7 +438,7 @@ namespace xscene::commands
             auto AssetArg   = m_Parser.getOptionArgAs<std::string>(m_hAsset, 0);
 
             const std::uint64_t Scene   = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id      = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id      = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             const std::uint64_t Library = std::holds_alternative<xerr>(LibraryArg) ? 0 : std::strtoull(std::get<std::string>(LibraryArg).c_str(), nullptr, 16);
 
             File.Write(Scene);
@@ -369,8 +464,8 @@ namespace xscene::commands
             for (auto& C : pOldPI->m_lComponents)
             {
                 File.Write(C.m_ComponentTypeGuid);
-                File.Write(static_cast<std::uint32_t>(C.m_MemberPath.size()));
-                for (auto P : C.m_MemberPath) File.Write(P);
+                File.Write(static_cast<std::uint32_t>(C.m_Member.size()));
+                for (auto P : C.m_Member) File.Write(P);
                 File.Write(static_cast<std::uint32_t>(C.m_PropertyOverrides.size()));
                 for (auto& O : C.m_PropertyOverrides)
                 {
@@ -384,13 +479,15 @@ namespace xscene::commands
             {
                 File.Write(D.m_ComponentTypeGuid);
                 File.Write(D.m_bAdded);
+                File.Write(static_cast<std::uint32_t>(D.m_Member.size()));
+                for (auto P : D.m_Member) File.Write(P);
             }
 
             File.Write(static_cast<std::uint32_t>(pOldPI->m_HierarchyDiffs.size()));
             for (auto& H : pOldPI->m_HierarchyDiffs)
             {
-                File.Write(static_cast<std::uint32_t>(H.m_MemberPath.size()));
-                for (auto P : H.m_MemberPath) File.Write(P);
+                File.Write(static_cast<std::uint32_t>(H.m_Member.size()));
+                for (auto P : H.m_Member) File.Write(P);
                 File.Write(H.m_bAdded);
             }
         }
@@ -398,7 +495,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;   File.Read(Scene);
-            std::uint32_t Id = 0;      File.Read(Id);
+            xecs::scene::permanent_id Id = 0;      File.Read(Id);
             std::uint64_t Library = 0; File.Read(Library);
             const std::string Asset = xeditor::ReadString(File);
 
@@ -420,8 +517,8 @@ namespace xscene::commands
                 {
                     File.Read(C.m_ComponentTypeGuid);
                     std::uint32_t PathCount = 0; File.Read(PathCount);
-                    C.m_MemberPath.resize(PathCount);
-                    for (auto& P : C.m_MemberPath) File.Read(P);
+                    C.m_Member.resize(PathCount);
+                    for (auto& P : C.m_Member) File.Read(P);
                     std::uint32_t OverrideCount = 0; File.Read(OverrideCount);
                     C.m_PropertyOverrides.resize(OverrideCount);
                     for (auto& O : C.m_PropertyOverrides)
@@ -437,6 +534,9 @@ namespace xscene::commands
                 {
                     File.Read(D.m_ComponentTypeGuid);
                     File.Read(D.m_bAdded);
+                    std::uint32_t PathCount = 0; File.Read(PathCount);
+                    D.m_Member.resize(PathCount);
+                    for (auto& P : D.m_Member) File.Read(P);
                 }
 
                 std::uint32_t HierCount = 0; File.Read(HierCount);
@@ -444,8 +544,8 @@ namespace xscene::commands
                 for (auto& H : OldHierarchy)
                 {
                     std::uint32_t PathCount = 0; File.Read(PathCount);
-                    H.m_MemberPath.resize(PathCount);
-                    for (auto& P : H.m_MemberPath) File.Read(P);
+                    H.m_Member.resize(PathCount);
+                    for (auto& P : H.m_Member) File.Read(P);
                     File.Read(H.m_bAdded);
                 }
             }
@@ -472,6 +572,122 @@ namespace xscene::commands
         }
 
         xcmdline::parser::handle m_hScene, m_hId, m_hLibrary, m_hAsset, m_hParent;
+    };
+
+    //================================================================================================
+    // UpgradeProject - converts the project's files that are still in an old format to the current one,
+    // all at once (documentation/Editors/prefabs_plan.md, decision D4; each file is also converted when it
+    // is next loaded and saved):
+    //   * prefabs stored in one Entity.txt (before phase 1): read with this Level's world (it has the
+    //     components of its Game) and saved in the scene format;
+    //   * scenes whose prefab instances were saved before recipes (phase 3: every member an entity file of
+    //     the scene, overrides addressed by child-index paths): loaded into this Level's world (a scene that is
+    //     open is already converted: loading converts), saved (the old member files go, each instance is
+    //     written as its recipe), and released again when it was not open.
+    // One that cannot be read (a component no module registers, a record the reader does not know) is left as
+    // it is and reported. Not undoable: it writes files, as Save does.
+    //================================================================================================
+    namespace upgrade
+    {
+        // The entity ids a scene's descriptor lists (its ActiveEntities rows: ;u32 or ;u64, the id after '#').
+        inline std::vector<xecs::scene::permanent_id> ActiveEntitiesOf(const std::filesystem::path& Descriptor) noexcept
+        {
+            std::vector<xecs::scene::permanent_id> Ids;
+            std::ifstream F(Descriptor, std::ios::binary);
+            std::string   Line;
+            while (std::getline(F, Line))
+            {
+                if (Line.find("\"Scene/ActiveEntities[G:") == std::string::npos) continue;
+                if (auto At = Line.find('#'); At != std::string::npos) Ids.push_back(xecs::scene::ParsePermanentId(Line.c_str() + At + 1));
+            }
+            return Ids;
+        }
+
+        // A prefab instance written before recipes: its file has a prefab_instance and no Format row.
+        inline bool IsOldInstanceFile(const std::filesystem::path& File) noexcept
+        {
+            std::ifstream F(File, std::ios::binary);
+            const std::string Text((std::istreambuf_iterator<char>(F)), std::istreambuf_iterator<char>());
+            return Text.find("\"EditorPrafabInstance/Prefab\"") != std::string::npos && Text.find("\"EditorPrafabInstance/Format\"") == std::string::npos;
+        }
+
+        // The scenes of the project with an instance written before recipes among the entities they list.
+        inline std::vector<std::uint64_t> ScenesWithOldInstances(const std::wstring& ProjectPath) noexcept
+        {
+            std::vector<std::uint64_t> Out;
+            std::error_code Ec;
+            for (auto It = std::filesystem::recursive_directory_iterator(std::filesystem::path(ProjectPath) / L"Descriptors" / L"Scene", std::filesystem::directory_options::skip_permission_denied, Ec)
+                ; !Ec && It != std::filesystem::recursive_directory_iterator(); It.increment(Ec))
+            {
+                if (!It->is_regular_file(Ec) || It->path().filename() != L"Descriptor.txt") continue;
+                const auto Folder = It->path().parent_path();
+                for (auto Id : ActiveEntitiesOf(It->path()))
+                {
+                    const auto File = Folder / L"entity_db" / std::format(L"{:02X}", Id & 0xFF) / std::format(L"{:02X}", (Id >> 8) & 0xFF) / (xecs::scene::FormatPermanentIdW(Id) + L".entity");
+                    if (IsOldInstanceFile(File)) { Out.push_back(std::wcstoull(Folder.stem().c_str(), nullptr, 16)); break; }       // the folder is <guid>.desc
+                }
+            }
+            std::sort(Out.begin(), Out.end());
+            return Out;
+        }
+    }
+
+    struct upgrade_project_query_cmd : scene_query_command
+    {
+        upgrade_project_query_cmd(xundo::system& System, void* pDataBase) noexcept : scene_query_command(System, "UpgradeProject", pDataBase) {}
+        const char* getCommandHelp() const noexcept override
+        {
+            return "Converts the project's files that are in an old format to the current one (prefabs stored in one Entity.txt; scenes whose prefab instances were saved before recipes), read with this Level's components; one that cannot be read is left as it is and listed. Not undoable. Usage: UpgradeProject";
+        }
+        void RegisterArguments() noexcept override {}
+
+        std::string Query() noexcept override
+        {
+            std::vector<std::uint64_t> OldPrefabs;
+            std::error_code Ec;
+            for (auto It = std::filesystem::recursive_directory_iterator(std::filesystem::path(World().m_PrefabMgr.m_ProjectPath) / L"Descriptors" / L"Prefab", std::filesystem::directory_options::skip_permission_denied, Ec)
+                ; !Ec && It != std::filesystem::recursive_directory_iterator(); It.increment(Ec))
+            {
+                if (It->is_regular_file(Ec) && It->path().filename() == L"Entity.txt")
+                    OldPrefabs.push_back(std::wcstoull(It->path().parent_path().stem().c_str(), nullptr, 16));      // the folder is <guid>.desc
+            }
+            std::sort(OldPrefabs.begin(), OldPrefabs.end());
+
+            std::string Converted, Left;
+            int         nConverted = 0, nLeft = 0;
+            for (auto Value : OldPrefabs)
+            {
+                const xecs::prefab::guid Guid{ .m_Instance = { Value }, .m_Type = xecs::prefab::type_guid_v };
+                auto Err = xlioncore::Ecs(World()).EnsureLoadedPrefab(Guid);
+                if (!Err) Err = xlioncore::Ecs(World()).SavePrefab(Guid);
+                if (Err) { ++nLeft;      Left      += std::format("  {:016X}  {}\n", Value, Err.getMessage()); }
+                else     { ++nConverted; Converted += std::format("  {:016X}\n", Value); }
+            }
+
+            // the scenes whose instances are not recipes yet
+            std::string ScenesConverted, ScenesLeft;
+            int         nScenes = 0, nScenesLeft = 0;
+            for (auto Value : upgrade::ScenesWithOldInstances(World().m_SceneMgr.m_ProjectPath))
+            {
+                const xecs::scene::guid SceneGuid{ .m_Instance = { Value } };
+                auto*      pOpen  = World().m_SceneMgr.Find(SceneGuid);
+                const bool bOpen  = pOpen && pOpen->m_State == xecs::scene::state::Active;
+                xerr       Err;
+                if (!bOpen) Err = xlioncore::Ecs(World()).RequestLoadScene(SceneGuid);
+                if (!Err)   Err = xlioncore::Ecs(World()).SaveScene(SceneGuid);
+                if (!bOpen) (void)xlioncore::Ecs(World()).ReleaseLoadScene(SceneGuid);
+
+                const auto Still     = upgrade::ScenesWithOldInstances(World().m_SceneMgr.m_ProjectPath);
+                const bool bStillOld = std::ranges::find(Still, Value) != Still.end();
+                if (Err || bStillOld) { ++nScenesLeft; ScenesLeft += std::format("  {:016X}  {}\n", Value, Err ? std::string(Err.getMessage()) : std::string("an instance could not be converted (its prefab or one of its entities did not load)")); }
+                else                  { ++nScenes;     ScenesConverted += std::format("  {:016X}\n", Value); }
+            }
+
+            return std::format("UpgradeProject: {} prefab(s) converted, {} left as they are (they cannot be read)\n{}{}{}{}"
+                               "UpgradeProject: {} scene(s) converted, {} left as they are\n{}{}{}{}"
+                , nConverted, nLeft, nConverted ? "Converted:\n" : "", Converted, nLeft ? "Left as they are:\n" : "", Left
+                , nScenes, nScenesLeft, nScenes ? "Scenes converted:\n" : "", ScenesConverted, nScenesLeft ? "Scenes left as they are:\n" : "", ScenesLeft);
+        }
     };
 }
 

@@ -306,7 +306,7 @@ namespace xscene
 
                 if (State.m_bEntityInspectorDirty)
                 {
-                    std::printf("[EntityDrag] Entity Properties inspector REBUILDING (m_bEntityInspectorDirty) for SelectedEntityId=%u\n", State.m_SelectedEntityId);
+                    std::printf("[EntityDrag] Entity Properties inspector REBUILDING (m_bEntityInspectorDirty) for SelectedEntityId=%llX\n", (unsigned long long)State.m_SelectedEntityId);
                     std::fflush(stdout);
                     EntityInspector.clear();
                     Bridge.m_ComponentMap.clear();

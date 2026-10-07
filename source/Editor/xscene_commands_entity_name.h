@@ -17,7 +17,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene = m_Parser.addOption("Scene", "Scene guid, 16 hex digits",        true,  1);
-            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 hex digits", true,  1);
+            m_hId    = m_Parser.addOption("Id",    "Entity permanent_id, 8 or 16 hex digits", true,  1);
             m_hName  = m_Parser.addOption("Name",  "New name",          false, 1);
             m_hClear = m_Parser.addOption("Clear", "1 = remove the name",               false, 1);
         }
@@ -58,7 +58,7 @@ namespace xscene::commands
             if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene) pOld = FindEntityName(*pScene, Id);
 
             File.Write(SceneGuid.m_Instance.m_Value);
-            File.Write(static_cast<std::uint32_t>(Id));
+            File.Write(Id);
             File.Write(static_cast<std::uint8_t>(pOld ? 1 : 0));
             xeditor::WriteString(File, pOld ? *pOld : std::string{});
         }
@@ -66,7 +66,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id    = 0; File.Read(Id);
+            xecs::scene::permanent_id Id    = 0; File.Read(Id);
             std::uint8_t  bHad  = 0; File.Read(bHad);
             const std::string Old = xeditor::ReadString(File);
 

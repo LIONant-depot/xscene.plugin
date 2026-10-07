@@ -15,7 +15,7 @@ namespace xscene
     inline std::string EntityDisplayName(const xecs::scene::instance& Scene, xecs::scene::permanent_id Id) noexcept
     {
         if (auto* pName = FindEntityName(Scene, Id); pName) return *pName;
-        return std::format("Entity #{}", Id);
+        return "Entity #" + xecs::scene::FormatPermanentId(Id);          // the id as the commands print it (8 hex digits, 16 for a derived one)
     }
 
     // GUID-like rather than sequential (was "Max + 1"): a random id means two branches each creating
@@ -24,7 +24,9 @@ namespace xscene
     // needs to be unique WITHIN this one scene (checked below) - not globally across all history, so a
     // folded-down 32-bit value is enough entropy for that; xresource::guid_generator::Instance64()
     // already mixes timestamp/thread/machine/random bits, reused here rather than inventing a second
-    // id-generation scheme.
+    // id-generation scheme. permanent_id is 64 bits since phase 2 of the prefab plan, but a minted id stays
+    // a 32-bit value: the entity files and descriptors of every existing project read and write as before
+    // (the rest of the range is for ids derived from an instance and a member, phase 3).
     xecs::scene::permanent_id NextFreeEntityId(xecs::scene::instance& Scene) noexcept
     {
         for(;;)

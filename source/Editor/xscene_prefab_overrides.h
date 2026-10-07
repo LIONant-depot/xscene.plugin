@@ -18,17 +18,18 @@ namespace xscene
         return xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(GameMgr), Entity);
     }
 
-    // Result of walking UP from some entity to find the prefab instance it's structurally part of -
-    // itself if it carries prefab_instance directly, else the nearest ancestor (via parent) that
-    // does, recording the child-index path down from that ancestor to the original entity along the
-    // way (see xecs::editor::prefab_component_override::m_MemberPath's own comment for why a path,
-    // not a stored id). Stops at the first prefab_instance found walking up - never crosses further
-    // out past a nested instance's own root, matching this session's existing nested-override scope.
+    // The prefab instance an entity is part of (prefabs_plan.md, phase 3: an instance is a recipe): itself when it carries the recipe (and is
+    // not a member of another instance), else the instance whose member it is, with the member's address in it (xecs::editor::member_address:
+    // the member's id in its prefab, one per nested instance crossed). An entity of the scene under a member is not part of the instance: it is
+    // an ordinary entity of the scene (it has its own file). m_pScene/m_RootId say where the instance lives (null/invalid for an entity of no
+    // scene).
     struct prefab_instance_context
     {
         xecs::editor::prefab_instance* m_pPI = nullptr;
         xecs::component::entity        m_RootEntity{};
-        std::vector<std::uint32_t>     m_MemberPath;
+        xecs::editor::member_address   m_Member;
+        xecs::scene::instance*         m_pScene = nullptr;
+        xecs::scene::permanent_id      m_RootId = xecs::scene::invalid_permanent_id_v;
     };
 
     prefab_instance_context FindContainingPrefabInstance(xecs::game_mgr::instance& GameMgr, xecs::component::entity Entity) noexcept
@@ -36,35 +37,41 @@ namespace xscene
         prefab_instance_context Ctx;
         if (Entity.isValid() == false) return Ctx;
 
-        std::vector<std::uint32_t> ReversePath;
-        auto Cur = Entity;
-        for(;;)
+        for (auto& pScene : GameMgr.m_SceneMgr.m_SceneInstances)
         {
-            if (auto* pPI = FindPrefabInstance(GameMgr, Cur))
+            auto It = pScene->m_RuntimeToLocal.find(Entity.m_Value);
+            if (It == pScene->m_RuntimeToLocal.end()) continue;
+
+            Ctx.m_pScene = pScene.get();
+            if (auto M = pScene->m_InstanceMembers.find(It->second); M != pScene->m_InstanceMembers.end())
             {
-                Ctx.m_pPI       = pPI;
-                Ctx.m_RootEntity = Cur;
-                Ctx.m_MemberPath.assign(ReversePath.rbegin(), ReversePath.rend());
+                auto RootIt = pScene->m_LocalToRuntime.find(M->second.m_Root);
+                if (RootIt == pScene->m_LocalToRuntime.end()) return {};
+                Ctx.m_pPI        = FindPrefabInstance(GameMgr, RootIt->second);
+                Ctx.m_RootEntity = RootIt->second;
+                Ctx.m_RootId     = M->second.m_Root;
+                Ctx.m_Member     = M->second.m_Address;
+                if (Ctx.m_pPI == nullptr) return {};
                 return Ctx;
             }
-
-            auto& Ecs = xlioncore::Ecs(GameMgr);
-            auto* pParent = Ecs.ParentOf(Cur);
-            if (pParent == nullptr) return {};   // no parent, and not a PI itself - not part of any instance
-
-            const auto ParentEntity = pParent->m_Value;
-            if (ParentEntity.isValid() == false) return {};
-
-            auto* pParentChildren = Ecs.ChildrenOf(ParentEntity);
-            if (pParentChildren == nullptr) return {};
-
-            auto& List = pParentChildren->m_List;
-            auto  It    = std::find_if(List.begin(), List.end(), [&](auto& E) noexcept { return E.m_Value == Cur.m_Value; });
-            if (It == List.end()) return {};
-
-            ReversePath.push_back(static_cast<std::uint32_t>(std::distance(List.begin(), It)));
-            Cur = ParentEntity;
+            if (auto* pPI = FindPrefabInstance(GameMgr, Entity))
+            {
+                Ctx.m_pPI        = pPI;
+                Ctx.m_RootEntity = Entity;
+                Ctx.m_RootId     = It->second;
+                return Ctx;
+            }
+            return {};
         }
+
+        if (auto* pPI = FindPrefabInstance(GameMgr, Entity)) { Ctx.m_pPI = pPI; Ctx.m_RootEntity = Entity; }
+        return Ctx;
+    }
+
+    // The address of an override entry or a diff (as the inspector and the commands compare them).
+    inline bool SameMember(std::span<const std::uint64_t> A, std::span<const std::uint64_t> B) noexcept
+    {
+        return std::ranges::equal(A, B);
     }
 
     // Resolves a live entity handle of UNKNOWN owning scene (all the inspector ever has for an
@@ -143,195 +150,28 @@ namespace xscene
     }
 
 
-    inline bool MemberPathStartsWith(std::span<const std::uint32_t> Path, std::span<const std::uint32_t> Prefix) noexcept
-    {
-        if (Path.size() < Prefix.size()) return false;
-        return std::equal(Prefix.begin(), Prefix.end(), Path.begin());
-    }
-
-    // After deleting the prefab member at MemberPath, drop overrides/diffs under it and shift
-    // sibling index paths that sat to its right (same parent prefix, higher index).
-    inline void ScrubAndShiftPathsAfterRemovedChild(xecs::editor::prefab_instance& PI, std::span<const std::uint32_t> RemovedPath) noexcept
-    {
-        if (RemovedPath.empty()) return;
-        const auto PrefixLen = RemovedPath.size() - 1;
-        const auto DeletedIndex = RemovedPath.back();
-
-        std::erase_if(PI.m_lComponents, [&](auto& C) noexcept
-        {
-            return MemberPathStartsWith(C.m_MemberPath, RemovedPath);
-        });
-        std::erase_if(PI.m_HierarchyDiffs, [&](auto& D) noexcept
-        {
-            if (D.m_MemberPath.size() == RemovedPath.size()
-             && std::equal(RemovedPath.begin(), RemovedPath.end(), D.m_MemberPath.begin()))
-                return false;
-            return MemberPathStartsWith(D.m_MemberPath, RemovedPath);
-        });
-
-        auto ShiftOne = [&](std::vector<std::uint32_t>& Path) noexcept
-        {
-            if (Path.size() <= PrefixLen) return;
-            if (!std::equal(RemovedPath.begin(), RemovedPath.begin() + static_cast<std::ptrdiff_t>(PrefixLen), Path.begin())) return;
-            if (Path[PrefixLen] > DeletedIndex) --Path[PrefixLen];
-        };
-        for (auto& C : PI.m_lComponents) ShiftOne(C.m_MemberPath);
-        for (auto& D : PI.m_HierarchyDiffs) ShiftOne(D.m_MemberPath);
-    }
-
-    // Call AFTER parenting a new child while links are intact. Records an added-child
-    // hierarchy diff when the new entity sits under a prefab_instance (not the PI root).
-    inline void RecordAddedChildOverride(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, xecs::component::entity Entity) noexcept
+    // A member of an instance was deleted (its subtree goes with it): the instance's recipe changes (the member is removed), so the instance's
+    // root is written at the next save. The recipe itself is refreshed from the live instance then (xecs::prefab::recipe::RefreshRecipe).
+    inline void MarkContainingInstanceDirty(xecs::game_mgr::instance& GameMgr, xecs::scene::guid SceneGuid, xecs::component::entity Entity) noexcept
     {
         auto Ctx = FindContainingPrefabInstance(GameMgr, Entity);
-        if (Ctx.m_pPI == nullptr || Ctx.m_MemberPath.empty()) return;
-
-        auto& PI = *Ctx.m_pPI;
-        // Re-adding after a remove: drop the matching Removed entry first.
-        std::erase_if(PI.m_HierarchyDiffs, [&](auto& D) noexcept
-        {
-            return !D.m_bAdded && std::ranges::equal(D.m_MemberPath, Ctx.m_MemberPath);
-        });
-        for (auto& D : PI.m_HierarchyDiffs)
-        {
-            if (D.m_bAdded && std::ranges::equal(D.m_MemberPath, Ctx.m_MemberPath))
-                return;
-        }
-
-        PI.m_HierarchyDiffs.push_back(xecs::editor::prefab_hierarchy_diff{
-            .m_MemberPath = Ctx.m_MemberPath,
-            .m_bAdded     = true
-        });
-
-        if (auto It = Scene.m_RuntimeToLocal.find(Ctx.m_RootEntity.m_Value); It != Scene.m_RuntimeToLocal.end())
-            GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, It->second);
+        if (Ctx.m_pPI == nullptr || Ctx.m_Member.empty() || Ctx.m_RootId == xecs::scene::invalid_permanent_id_v) return;
+        GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, Ctx.m_RootId);
     }
 
-    // Call BEFORE destroying Entity while parent/children links are still intact. Records a
-    // removed-child hierarchy diff on the containing prefab_instance when Entity is a member
-    // under that instance (not the PI root itself). If this path was an Added override, cancel
-    // that entry instead of writing a Removed (create-under-PI Undo goes through delete).
-    inline void RecordRemovedChildOverride(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::guid SceneGuid, xecs::component::entity Entity) noexcept
-    {
-        auto Ctx = FindContainingPrefabInstance(GameMgr, Entity);
-        if (Ctx.m_pPI == nullptr || Ctx.m_MemberPath.empty()) return;
-
-        auto& PI = *Ctx.m_pPI;
-        const auto AddedIt = std::ranges::find_if(PI.m_HierarchyDiffs, [&](auto& D) noexcept
-        {
-            return D.m_bAdded && std::ranges::equal(D.m_MemberPath, Ctx.m_MemberPath);
-        });
-        if (AddedIt != PI.m_HierarchyDiffs.end())
-        {
-            PI.m_HierarchyDiffs.erase(AddedIt);
-            ScrubAndShiftPathsAfterRemovedChild(PI, Ctx.m_MemberPath);
-            if (auto It = Scene.m_RuntimeToLocal.find(Ctx.m_RootEntity.m_Value); It != Scene.m_RuntimeToLocal.end())
-                GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, It->second);
-            return;
-        }
-
-        for (auto& D : PI.m_HierarchyDiffs)
-        {
-            if (!D.m_bAdded && std::ranges::equal(D.m_MemberPath, Ctx.m_MemberPath))
-                return;
-        }
-
-        PI.m_HierarchyDiffs.push_back(xecs::editor::prefab_hierarchy_diff{
-            .m_MemberPath = Ctx.m_MemberPath,
-            .m_bAdded     = false
-        });
-        ScrubAndShiftPathsAfterRemovedChild(PI, Ctx.m_MemberPath);
-
-        if (auto It = Scene.m_RuntimeToLocal.find(Ctx.m_RootEntity.m_Value); It != Scene.m_RuntimeToLocal.end())
-            GameMgr.m_SceneMgr.MarkEntityDirty(SceneGuid, It->second);
-    }
-
-    // Finds the override-tracking entry for a given (component type, group member) pair on a prefab
-    // instance, creating one (as OVERRIDES) if none exists yet - fixes the old, never-finished
-    // design's bug of always appending a new entry even when one already exists. MemberPath empty
-    // means the prefab_instance-carrying entity itself (the only case that existed before
-    // multi-entity groups); non-empty addresses a plain child/nested-instance-root member instead -
-    // see prefab_component_override::m_MemberPath's own comment.
-    xecs::editor::prefab_component_override& FindOrCreateOverrideEntry(xecs::editor::prefab_instance& PI, std::uint64_t ComponentTypeGuidValue, std::span<const std::uint32_t> MemberPath) noexcept
+    // Finds the override-tracking entry for a given (component type, member) pair on a prefab instance, creating one if none exists yet. Member
+    // empty means the entity that carries the prefab_instance; otherwise the member's address (xecs::editor::member_address).
+    xecs::editor::prefab_component_override& FindOrCreateOverrideEntry(xecs::editor::prefab_instance& PI, std::uint64_t ComponentTypeGuidValue, std::span<const std::uint64_t> Member) noexcept
     {
         for (auto& C : PI.m_lComponents)
-            if (C.m_ComponentTypeGuid == ComponentTypeGuidValue && std::ranges::equal(C.m_MemberPath, MemberPath)) return C;
+            if (C.m_ComponentTypeGuid == ComponentTypeGuidValue && SameMember(C.m_Member, Member)) return C;
 
         PI.m_lComponents.push_back(xecs::editor::prefab_component_override
         { .m_ComponentTypeGuid = ComponentTypeGuidValue
-        , .m_MemberPath        = std::vector<std::uint32_t>(MemberPath.begin(), MemberPath.end())
+        , .m_Member            = xecs::editor::member_address(Member.begin(), Member.end())
         , .m_PropertyOverrides = {}
         });
         return PI.m_lComponents.back();
-    }
-
-    // Attaches a fresh (no overrides yet) prefab_instance component pointed at PrefabGuid onto
-    // Entity, and re-registers the (possibly archetype-migrated - AddOrRemoveComponents returns a new
-    // entity handle) result into Scene's local/runtime maps under Id. The common tail end of both
-    // "instantiate a prefab into a scene" (Entity is brand new, Id not yet in the maps - the erase
-    // below is just a harmless no-op) and "the entity just dragged out becomes an instance of the
-    // prefab created from it" (Entity/Id already exist in the maps under the same Id).
-    //
-    // pState (nullable - InstantiatePrefabIntoScene's brand-new entity can never already be selected,
-    // so it passes nullptr) matters for the OTHER caller, entity_to_prefab_drop::OnDrop: if the
-    // dragged-out entity happened to be the one currently shown in the Entity Properties panel, this
-    // migration invalidates State.m_SelectedEntity (a stale handle) AND every pool-memory address the
-    // xproperty inspector cached for it (entity_inspector_bridge::m_ComponentMap, populated by the
-    // m_bEntityInspectorDirty rebuild block in RenderEntityPropertiesPanel) - exactly like the entity
-    // handle "Add Component"/"Remove Component" migrate, except NEITHER of those refreshed State nor
-    // set the dirty flag afterward for THIS migration, since this function used to have no idea a
-    // selection even existed. Without this fix, editing a property afterward through the still-
-    // displayed, now-stale inspector hands OnPropertyChanged a dangling/reused pool address via
-    // Cmd.m_pClassObject - a plausible root cause for "override a property, then Save -> invalidated
-    // vector iterator" style corruption that only manifests through real UI interaction, never
-    // through headless, data-only testing (which never drives State/the component map at all).
-    void AttachPrefabInstanceComponent(xecs::game_mgr::instance& GameMgr, xecs::scene::instance& Scene, xecs::scene::permanent_id Id, xecs::component::entity Entity, xecs::prefab::guid PrefabGuid, scene_state* pState) noexcept
-    {
-        const bool bWasSelected = pState != nullptr && pState->m_SelectedEntity.m_Value == Entity.m_Value;
-
-        xecs::component::entity NewEntity;
-
-        // If Entity already carries editor::prefab_instance, it's the root of a NESTED prefab
-        // instance (this prefab's own root wraps a DIFFERENT prefab - the "variant" case): the
-        // engine's own instantiation already gave it correct live DATA (re-derived from the INNER
-        // prefab's current state, inner-relative overrides applied), but its PI still identifies as
-        // an instance of the INNER prefab, not the OUTER one the user actually just placed - without
-        // stamping over it here, the scene entity is silently tracked under the wrong prefab guid
-        // (asset-browser "reveal", future re-instantiation-of-this-prefab bookkeeping, etc. would all
-        // point at the inner prefab instead of what was dragged in). No AddOrRemoveComponents needed
-        // (the bit is already set, no archetype migration) - just overwrite the existing component's
-        // fields directly. m_lComponents/m_ComponentDiffs are reset to empty rather than left as-is:
-        // they were computed relative to the INNER prefab and would misleadingly describe "overrides"
-        // relative to the wrong base; a save recomputes them fresh anyway
-        // (RefreshPrefabInstanceOverlayRecord), so this loses no data - it only avoids a stale,
-        // wrongly-labeled "differs from prefab" indicator in the Properties panel between placement
-        // and the next save. Checked via findIndexComponentFromInfo (matches the per-component lookup
-        // SaveGroupMember/LoadGroupMember already use), not getComponentBits().getBit() - see
-        // dependencies/xECSV2/doc/getbit_vs_findindexcomponentfrominfo.md.
-        auto& Ecs = xlioncore::Ecs(GameMgr);
-        if( auto* pExistingPI = xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, Entity) )
-        {
-            auto& PI = *pExistingPI;
-            PI.m_PrefabInstance = PrefabGuid;
-            PI.m_lComponents.clear();
-            PI.m_ComponentDiffs.clear();
-            NewEntity = Entity;
-        }
-        else
-        {
-            NewEntity = xlioncore::AddComponentsOf<xecs::editor::prefab_instance>(Ecs, Entity);
-            xlioncore::ComponentOf<xecs::editor::prefab_instance>(Ecs, NewEntity)->m_PrefabInstance = PrefabGuid;
-        }
-
-        Scene.m_RuntimeToLocal.erase(Entity.m_Value);
-        Scene.m_LocalToRuntime[Id]               = NewEntity;
-        Scene.m_RuntimeToLocal[NewEntity.m_Value] = Id;
-
-        if (bWasSelected)
-        {
-            pState->m_SelectedEntity        = NewEntity;
-            pState->m_bEntityInspectorDirty = true;
-        }
     }
 
 } // namespace xscene

@@ -90,7 +90,7 @@ namespace xscene::commands
         if (It == pScene->m_LocalToRuntime.end()) return;
 
         xscene::DeleteEntitySubtree(Ed.World(), *pScene, SceneGuid, It->second);
-        std::printf("[DeleteSubtreeByPermanentId] Id=%u deleted\n", Id); std::fflush(stdout);
+        std::printf("[DeleteSubtreeByPermanentId] Id=%llX deleted\n", (unsigned long long)Id); std::fflush(stdout);
 
         if (&Ed.m_State)
         {
@@ -138,7 +138,7 @@ namespace xscene::commands
             auto Ctx = xscene::FindContainingPrefabInstance(Ed.World(), pScene->m_LocalToRuntime.at(RootId));
             // MemberPath empty ⇒ RootId IS the PI root (or not under a PI). RecordRemovedChildOverride
             // no-ops in that case, so there is nothing extra to restore.
-            if (Ctx.m_pPI != nullptr && !Ctx.m_MemberPath.empty())
+            if (Ctx.m_pPI != nullptr && !Ctx.m_Member.empty())
             {
                 pPI = Ctx.m_pPI;
                 if (auto It = pScene->m_RuntimeToLocal.find(Ctx.m_RootEntity.m_Value); It != pScene->m_RuntimeToLocal.end())
@@ -149,14 +149,14 @@ namespace xscene::commands
         File.Write(pPI != nullptr && PIRootId != xecs::scene::invalid_permanent_id_v);
         if (!pPI || PIRootId == xecs::scene::invalid_permanent_id_v) return;
 
-        File.Write(static_cast<std::uint32_t>(PIRootId));
+        File.Write(PIRootId);
 
         File.Write(static_cast<std::uint32_t>(pPI->m_lComponents.size()));
         for (auto& C : pPI->m_lComponents)
         {
             File.Write(C.m_ComponentTypeGuid);
-            File.Write(static_cast<std::uint32_t>(C.m_MemberPath.size()));
-            for (auto P : C.m_MemberPath) File.Write(P);
+            File.Write(static_cast<std::uint32_t>(C.m_Member.size()));
+            for (auto P : C.m_Member) File.Write(P);
             File.Write(static_cast<std::uint32_t>(C.m_PropertyOverrides.size()));
             for (auto& O : C.m_PropertyOverrides)
             {
@@ -168,8 +168,8 @@ namespace xscene::commands
         File.Write(static_cast<std::uint32_t>(pPI->m_HierarchyDiffs.size()));
         for (auto& H : pPI->m_HierarchyDiffs)
         {
-            File.Write(static_cast<std::uint32_t>(H.m_MemberPath.size()));
-            for (auto P : H.m_MemberPath) File.Write(P);
+            File.Write(static_cast<std::uint32_t>(H.m_Member.size()));
+            for (auto P : H.m_Member) File.Write(P);
             File.Write(H.m_bAdded);
         }
     }
@@ -179,7 +179,7 @@ namespace xscene::commands
         bool bHad = false; File.Read(bHad);
         if (!bHad) return;
 
-        std::uint32_t PIRootIdVal = 0; File.Read(PIRootIdVal);
+        xecs::scene::permanent_id PIRootIdVal = 0; File.Read(PIRootIdVal);
 
         std::vector<xecs::editor::prefab_component_override> OldComponents;
         std::vector<xecs::editor::prefab_hierarchy_diff>     OldHierarchy;
@@ -190,8 +190,8 @@ namespace xscene::commands
         {
             File.Read(C.m_ComponentTypeGuid);
             std::uint32_t PathCount = 0; File.Read(PathCount);
-            C.m_MemberPath.resize(PathCount);
-            for (auto& P : C.m_MemberPath) File.Read(P);
+            C.m_Member.resize(PathCount);
+            for (auto& P : C.m_Member) File.Read(P);
             std::uint32_t OverrideCount = 0; File.Read(OverrideCount);
             C.m_PropertyOverrides.resize(OverrideCount);
             for (auto& O : C.m_PropertyOverrides)
@@ -206,8 +206,8 @@ namespace xscene::commands
         for (auto& H : OldHierarchy)
         {
             std::uint32_t PathCount = 0; File.Read(PathCount);
-            H.m_MemberPath.resize(PathCount);
-            for (auto& P : H.m_MemberPath) File.Read(P);
+            H.m_Member.resize(PathCount);
+            for (auto& P : H.m_Member) File.Read(P);
             File.Read(H.m_bAdded);
         }
 
@@ -246,7 +246,7 @@ namespace xscene::commands
         {
             File.Write(static_cast<std::uint32_t>(xecs::scene::invalid_folder_id_v));
             File.Write(std::uint32_t{ 0 });
-            File.Write(static_cast<std::uint32_t>(xecs::scene::invalid_permanent_id_v));
+            File.Write(xecs::scene::invalid_permanent_id_v);
             File.Write(std::uint32_t{ 0 });
             File.Write(std::uint32_t{ 0 });
             File.Write(false); // no containing-PI override snapshot (matches SnapshotContainingPrefabOverrides)
@@ -306,7 +306,7 @@ namespace xscene::commands
                     }
                 }
             }
-            File.Write(static_cast<std::uint32_t>(RootParentId));
+            File.Write(RootParentId);
             File.Write(ChildIndex);
         }
 
@@ -350,8 +350,17 @@ namespace xscene::commands
         File.Write(static_cast<std::uint32_t>(Entries.size()));
         for (auto& E : Entries)
         {
-            File.Write(static_cast<std::uint32_t>(E.m_RealId));
-            File.Write(static_cast<std::uint32_t>(E.m_ShadowId));
+            File.Write(E.m_RealId);
+            File.Write(E.m_ShadowId);
+
+            // a member of a prefab instance (prefabs_plan.md, phase 3): which instance, its address, the name it was spawned with
+            auto M = pScene->m_InstanceMembers.find(E.m_RealId);
+            File.Write(M != pScene->m_InstanceMembers.end());
+            if (M == pScene->m_InstanceMembers.end()) continue;
+            File.Write(M->second.m_Root);
+            File.Write(static_cast<std::uint32_t>(M->second.m_Address.size()));
+            for (auto A : M->second.m_Address) File.Write(A);
+            xeditor::WriteString(File, M->second.m_Name);
         }
 
         // AFTER the subtree entries: containing-PI override bookkeeping (see helpers above). Must
@@ -366,18 +375,23 @@ namespace xscene::commands
     {
         std::uint32_t FolderVal = 0;     File.Read(FolderVal);
         std::uint32_t FolderIndex = 0;   File.Read(FolderIndex);
-        std::uint32_t RootParentId = 0;  File.Read(RootParentId);
+        xecs::scene::permanent_id RootParentId = 0;  File.Read(RootParentId);
         std::uint32_t ChildIndex = 0;    File.Read(ChildIndex);
         std::uint32_t Count = 0;         File.Read(Count);
 
-        struct snapshot_entry { xecs::scene::permanent_id m_RealId; xecs::scene::permanent_id m_ShadowId; };
+        struct snapshot_entry { xecs::scene::permanent_id m_RealId; xecs::scene::permanent_id m_ShadowId; bool m_bMember = false; xecs::scene::instance_member m_Member; };
         std::vector<snapshot_entry> Entries(Count);
         for (auto& E : Entries)
         {
-            std::uint32_t RealId = 0, ShadowId = 0;
-            File.Read(RealId);
-            File.Read(ShadowId);
-            E = { static_cast<xecs::scene::permanent_id>(RealId), static_cast<xecs::scene::permanent_id>(ShadowId) };
+            File.Read(E.m_RealId);
+            File.Read(E.m_ShadowId);
+            File.Read(E.m_bMember);
+            if (!E.m_bMember) continue;
+            File.Read(E.m_Member.m_Root);
+            std::uint32_t n = 0; File.Read(n);
+            E.m_Member.m_Address.resize(n);
+            for (auto& A : E.m_Member.m_Address) File.Read(A);
+            E.m_Member.m_Name = xeditor::ReadString(File);
         }
         if (Entries.empty())
         {
@@ -413,6 +427,7 @@ namespace xscene::commands
             pScene->m_RuntimeToLocal.erase(NewEntity.m_Value);
             pScene->m_LocalToRuntime[E.m_RealId]        = NewEntity;
             pScene->m_RuntimeToLocal[NewEntity.m_Value] = E.m_RealId;
+            if (E.m_bMember) pScene->m_InstanceMembers[E.m_RealId] = E.m_Member;
 
             // Exact inverse of DeleteEntitySubtree's own MarkEntityDeleted for this same id - see
             // this file's own top comment quoting m_PendingChanges' documented undo contract.
@@ -440,14 +455,25 @@ namespace xscene::commands
             });
         }
 
+        // A recipe's file does not hold its root's children, and an entity restored on its own is not in its parent's list: every restored
+        // entity joins its parent's children list.
+        xlioncore::Ecs(Ed.World()).LinkSceneChildren(*pScene);
+
         // Pass 3: prefab-instance overrides need every reference resolved first - see LoadEntity's own
         // comment for why doing this any earlier crashed (confirmed already hit once this session, at
-        // the real scene-load path this mirrors).
-        for (auto Entity : Restored)
+        // the real scene-load path this mirrors). An instance's own overrides on itself; the overrides of
+        // the instance whose members were restored, on them (a member restored from its file starts from
+        // its prefab's values where its instance overrides them).
+        std::vector<xecs::scene::permanent_id> Instances;
+        for (auto& E : Entries)
         {
-            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(Ed.World()), Entity))
-                xlioncore::Ecs(Ed.World()).ApplyPrefabInstancePropertyOverrides(Entity);
+            if (E.m_bMember && std::ranges::find(Instances, E.m_Member.m_Root) == Instances.end()) Instances.push_back(E.m_Member.m_Root);
+            auto It = pScene->m_LocalToRuntime.find(E.m_RealId);
+            if (It == pScene->m_LocalToRuntime.end() || E.m_bMember) continue;
+            if (xlioncore::ComponentOf<xecs::editor::prefab_instance>(xlioncore::Ecs(Ed.World()), It->second))
+                xlioncore::Ecs(Ed.World()).ApplyPrefabInstancePropertyOverrides(It->second);
         }
+        for (auto Root : Instances) xlioncore::Ecs(Ed.World()).ApplyPrefabRecipeToMembers(*pScene, Root);
 
         // Root-only, matching SnapshotSubtreeForRestore's own root-only capture. ReparentEntityIntoFolder
         // itself always appends at the end, so re-insert at the originally-captured index afterward,
@@ -475,7 +501,7 @@ namespace xscene::commands
         // up - not the parent's `children` field, pointing back down). Inserted at the originally-
         // captured ChildIndex rather than appended, same "restore to the same place" reasoning as the
         // folder case above.
-        if (RootParentId != static_cast<std::uint32_t>(xecs::scene::invalid_permanent_id_v))
+        if (RootParentId != xecs::scene::invalid_permanent_id_v)
         {
             if (auto ParentIt = pScene->m_LocalToRuntime.find(static_cast<xecs::scene::permanent_id>(RootParentId)); ParentIt != pScene->m_LocalToRuntime.end())
             {
@@ -516,7 +542,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene  = m_Parser.addOption("Scene",  "Scene guid, 16 hex digits",                                 true,  1);
-            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 hex digits, pre-minted by the caller", true,  1);
+            m_hId     = m_Parser.addOption("Id",     "Entity permanent_id, 8 or 16 hex digits, pre-minted by the caller", true,  1);
             m_hFolder = m_Parser.addOption("Folder", "Target folder id, 8 hex digits (0 = loose/none)",           true,  1);
             // NOT required - ShowCreateMenuItems' Scene/Folder-row call sites never pass this at all
             // (only the entity-row "New Entity" does, to create a child). Marking it required broke
@@ -524,7 +550,7 @@ namespace xscene::commands
             // command the moment ANY required option has zero args (xcmdline_parser.h ~line 119) -
             // confirmed via direct external review, then verified against the parser's own source
             // before fixing (rather than taking the report at face value).
-            m_hParent = m_Parser.addOption("Parent", "Parent entity permanent_id, 8 hex digits, if creating a child", false, 1);
+            m_hParent = m_Parser.addOption("Parent", "Parent entity permanent_id, 8 or 16 hex digits, if creating a child", false, 1);
             m_hComponents = m_Parser.addOption("Components", "Components the new entity starts with: names or type guids, separated by commas", false, 1);
         }
 
@@ -539,6 +565,7 @@ namespace xscene::commands
             const auto SceneGuid = ParseSceneGuid(std::get<std::string>(SceneArg));
             const auto Id        = ParseEntityId(std::get<std::string>(IdArg));
             const auto FolderVal = static_cast<xecs::scene::folder_id>(std::strtoul(std::get<std::string>(FolderArg).c_str(), nullptr, 16));
+            if (Id > xecs::scene::max_permanent_id_v) return "CreateEntity: the id does not fit in 63 bits (the top bit is reserved: a negative encoded reference is an external one)";
 
             // -Parent is genuinely optional (see RegisterArguments' own comment) - absent means "no
             // parent, use Folder instead", not a parse failure.
@@ -602,8 +629,8 @@ namespace xscene::commands
                 xlioncore::Ecs(World()).ParentOf(NewChildEntity)->m_Value = ParentEntity;
                 xlioncore::Ecs(World()).ChildrenOf(ParentEntity)->m_List.push_back(NewChildEntity);
 
-                // Prefab composition: child under a PI is an instance hierarchy add (m_bAdded).
-                xscene::RecordAddedChildOverride(World(), *pScene, SceneGuid, NewChildEntity);
+                // Under a member of a prefab instance (or its root), it is an entity of the scene added there: it has its own file, and its
+                // instance's recipe lists it when it is next refreshed (nothing to record here).
 
                 World().m_SceneMgr.MarkEntityDirty(SceneGuid, ParentId);
             }
@@ -630,15 +657,15 @@ namespace xscene::commands
             auto ParentArg = m_Parser.getOptionArgAs<std::string>(m_hParent, 0);
 
             const std::uint64_t Scene = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id    = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
-            const std::uint32_t ParentId = std::holds_alternative<xerr>(ParentArg) ? static_cast<std::uint32_t>(xecs::scene::invalid_permanent_id_v) : ParseEntityId(std::get<std::string>(ParentArg));
+            const xecs::scene::permanent_id Id    = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id ParentId = std::holds_alternative<xerr>(ParentArg) ? xecs::scene::invalid_permanent_id_v : ParseEntityId(std::get<std::string>(ParentArg));
 
             File.Write(Scene);
             File.Write(Id);
             File.Write(ParentId);
 
             bool bParentAlreadyHadChildren = true; // harmless default - only consulted when ParentId is valid
-            if (ParentId != static_cast<std::uint32_t>(xecs::scene::invalid_permanent_id_v))
+            if (ParentId != xecs::scene::invalid_permanent_id_v)
             {
                 const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
                 if (auto* pScene = World().m_SceneMgr.Find(SceneGuid))
@@ -655,8 +682,8 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0;    File.Read(Scene);
-            std::uint32_t Id = 0;       File.Read(Id);
-            std::uint32_t ParentId = 0; File.Read(ParentId);
+            xecs::scene::permanent_id Id = 0;       File.Read(Id);
+            xecs::scene::permanent_id ParentId = 0; File.Read(ParentId);
             bool bParentAlreadyHadChildren = true; File.Read(bParentAlreadyHadChildren);
 
             const auto SceneGuid = xecs::scene::guid{ .m_Instance = { Scene } };
@@ -674,7 +701,7 @@ namespace xscene::commands
             // existing parent-scrub side effect) - if Redo() had to ADD that children component in the
             // first place (the parent didn't have one before) and the list is now empty, strip the
             // component entirely rather than leaving an empty, untidy one behind.
-            if (!bParentAlreadyHadChildren && ParentId != static_cast<std::uint32_t>(xecs::scene::invalid_permanent_id_v))
+            if (!bParentAlreadyHadChildren && ParentId != xecs::scene::invalid_permanent_id_v)
             {
                 if (auto* pScene = World().m_SceneMgr.Find(SceneGuid))
                 {
@@ -716,7 +743,7 @@ namespace xscene::commands
         void RegisterArguments() noexcept override
         {
             m_hScene = m_Parser.addOption("Scene", "Scene guid, 16 hex digits",             true, 1);
-            m_hId    = m_Parser.addOption("Id",    "Root entity permanent_id, 8 hex digits", true, 1);
+            m_hId    = m_Parser.addOption("Id",    "Root entity permanent_id, 8 or 16 hex digits", true, 1);
         }
 
         std::string Redo() noexcept override
@@ -745,7 +772,7 @@ namespace xscene::commands
             auto IdArg    = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
 
             const std::uint64_t Scene = std::holds_alternative<xerr>(SceneArg) ? 0 : std::strtoull(std::get<std::string>(SceneArg).c_str(), nullptr, 16);
-            const std::uint32_t Id    = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
+            const xecs::scene::permanent_id Id    = std::holds_alternative<xerr>(IdArg) ? 0 : ParseEntityId(std::get<std::string>(IdArg));
             File.Write(Scene);
             File.Write(Id);
 
@@ -755,7 +782,7 @@ namespace xscene::commands
         void Undo(xundo::undo_file& File) noexcept override
         {
             std::uint64_t Scene = 0; File.Read(Scene);
-            std::uint32_t Id = 0;    File.Read(Id);
+            xecs::scene::permanent_id Id = 0;    File.Read(Id);
             RestoreSubtreeFromSnapshot(SceneContext(), File, xecs::scene::guid{ .m_Instance = { Scene } }, static_cast<xecs::scene::permanent_id>(Id));
         }
 

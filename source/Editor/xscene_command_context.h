@@ -103,20 +103,21 @@ namespace xscene::commands
         return std::format("{:016X}", Guid.m_Instance.m_Value);
     }
 
-    // Parses/formats an entity permanent_id as 8 hex digits - standardizes it to match every other
+    // Parses/formats an entity permanent_id in hex - standardizes it to match every other
     // id/guid a command ever takes (Scene/Component/TypeGuid/Level/Folder are all hex already).
     // permanent_id used to be the one remaining decimal field (parsed via plain std::stoul) - direct
     // user report: "I think we need to standardize the way we do GUIDs.... I think they should always
-    // be in hex." xecs::scene::permanent_id is a plain std::uint32_t (xecs_scene.h), so 8 hex digits
-    // matches Folder/TypeGuid's own existing width exactly, not an arbitrary new choice.
+    // be in hex." xecs::scene::permanent_id is 64 bits (prefab plan phase 2): an id that fits in 32 bits is
+    // written with 8 digits (every id of before the widening reads the same), a larger one with 16;
+    // either width is accepted (xecs_scene.h's FormatPermanentId/ParsePermanentId).
     inline xecs::scene::permanent_id ParseEntityId(std::string_view Text) noexcept
     {
-        return static_cast<xecs::scene::permanent_id>(std::strtoul(std::string(Text).c_str(), nullptr, 16));
+        return xecs::scene::ParsePermanentId(std::string(Text).c_str());
     }
 
     inline std::string FormatEntityId(xecs::scene::permanent_id Id) noexcept
     {
-        return std::format("{:08X}", Id);
+        return xecs::scene::FormatPermanentId(Id);
     }
 
     // xproperty::settings::AnyToString (my_properties.h, shared xproperty lib) only knows the
