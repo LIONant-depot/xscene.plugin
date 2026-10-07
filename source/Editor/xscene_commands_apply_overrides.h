@@ -244,7 +244,7 @@ namespace xscene::commands
                 return std::format("ApplyOverrides: {}", Err.getMessage());
 
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
-            State().m_bEntityInspectorDirty = true;
+            ResolveSelection(World(), State());         // the other instances of the prefab in this world were spawned again with the change (live update, prefabs_plan.md phase 6)
             return {};
         }
 
@@ -309,11 +309,18 @@ namespace xscene::commands
 
             PI.m_lComponents    = std::move(TempPI.m_lComponents);
             PI.m_HierarchyDiffs = std::move(TempPI.m_HierarchyDiffs);
-            if (auto Err = xlioncore::Ecs(World()).SavePrefab(PI.m_PrefabInstance); Err)
+            // The live members say what the overrides say again: since the Apply the instance may have been spawned again without them (a Prefab Editor that turned the change down
+            // brings the Level back to the file), and the live update below reads its recipe from what the members hold.
+            xlioncore::Ecs(World()).ApplyPrefabRecipeToMembers(*pScene, static_cast<xecs::scene::permanent_id>(Id));
+            const auto Prefab = PI.m_PrefabInstance;
+            if (auto Err = xlioncore::Ecs(World()).SavePrefab(Prefab); Err)
                 xeditor::NotifyToast(std::format("ApplyOverrides Undo: Prefab Save failed: {}", Err.getMessage()));
 
             World().m_SceneMgr.MarkEntityDirty(SceneGuid, static_cast<xecs::scene::permanent_id>(Id));
-            State().m_bEntityInspectorDirty = true;
+            // The instances of the prefab in this world (this one too: PI is not used after this) are spawned again from the template as it is back to (live update,
+            // prefabs_plan.md phase 6; the template's values only changed, so their recipes read the same against it). The other editors heard of the save.
+            xlioncore::Ecs(World()).LiveUpdatePrefab(Prefab, /*bFromFile*/ false);
+            ResolveSelection(World(), State());
         }
 
         xcmdline::parser::handle m_hScene, m_hId;

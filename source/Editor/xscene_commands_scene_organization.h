@@ -282,7 +282,10 @@ namespace xscene::commands
 
             auto* pScene = World().m_SceneMgr.Find(SceneGuid);
             if (!pScene) return "InstantiatePrefab: scene not found";
-            if (pScene->m_bPrefabDocument && pScene->m_Guid.m_Instance == PrefabGuid.m_Instance) return "InstantiatePrefab: a prefab cannot hold an instance of itself";
+            // Directly, or through a prefab that nests it however deep (A holds B holds A: its plan would never end).
+            if (pScene->m_bPrefabDocument && xlioncore::Ecs(World()).PrefabUses(PrefabGuid, xecs::prefab::guid{ .m_Instance = pScene->m_Guid.m_Instance, .m_Type = xecs::prefab::type_guid_v }))
+                return pScene->m_Guid.m_Instance == PrefabGuid.m_Instance ? "InstantiatePrefab: a prefab cannot hold an instance of itself"
+                                                                          : "InstantiatePrefab: a prefab cannot hold an instance of itself (the prefab placed nests it)";
             if (pScene->m_LocalToRuntime.contains(Id)) return "InstantiatePrefab: id already in use";
 
             xecs::component::entity Parent{};

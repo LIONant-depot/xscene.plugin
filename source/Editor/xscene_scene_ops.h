@@ -166,4 +166,24 @@ namespace xscene
             State.m_MultiSelectOrder.clear();
         }
     }
+
+    // The entities of the open scenes were made again under the same ids (a live update of prefab instances, prefabs_plan.md phase 6): the live handle of the selection is found
+    // again from its id; an id that is gone (a member the prefab lost) is no longer selected. The Inspector reads the entity again.
+    inline void ResolveSelection(xecs::game_mgr::instance& GameMgr, scene_state& State) noexcept
+    {
+        State.m_SelectedEntity = {};
+        if (State.m_SelectedEntityId != xecs::scene::invalid_permanent_id_v)
+        {
+            if (auto* pScene = GameMgr.m_SceneMgr.Find(State.m_SelectedEntityScene); pScene && pScene->m_LocalToRuntime.contains(State.m_SelectedEntityId))
+                State.m_SelectedEntity = pScene->m_LocalToRuntime.at(State.m_SelectedEntityId);
+            else
+                State.m_SelectedEntityId = xecs::scene::invalid_permanent_id_v;
+        }
+        if (auto* pScene = GameMgr.m_SceneMgr.Find(State.m_MultiSelectScene))
+        {
+            std::erase_if(State.m_MultiSelectedEntityIds, [&](xecs::scene::permanent_id Id) noexcept { return !pScene->m_LocalToRuntime.contains(Id); });
+            std::erase_if(State.m_MultiSelectOrder,       [&](xecs::scene::permanent_id Id) noexcept { return !pScene->m_LocalToRuntime.contains(Id); });
+        }
+        State.m_bEntityInspectorDirty = true;
+    }
 }
