@@ -50,7 +50,7 @@ namespace xscene::commands
     // as "no reference" symmetrically.
     inline std::pair<xecs::scene::guid, xecs::scene::permanent_id> FindEntityOwningScene(scene_context& Ed, xecs::component::entity Entity) noexcept
     {
-        if (!Entity.isValid() || !&Ed.m_State) return { xecs::scene::guid{}, xecs::scene::invalid_permanent_id_v };
+        if (!Entity.isValid()) return { xecs::scene::guid{}, xecs::scene::invalid_permanent_id_v };
         for (auto& SceneGuid : Ed.m_State.m_OpenScenes)
         {
             auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);

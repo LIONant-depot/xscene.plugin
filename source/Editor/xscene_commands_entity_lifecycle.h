@@ -92,7 +92,7 @@ namespace xscene::commands
         xscene::DeleteEntitySubtree(Ed.World(), *pScene, SceneGuid, It->second);
         std::printf("[DeleteSubtreeByPermanentId] Id=%llX deleted\n", (unsigned long long)Id); std::fflush(stdout);
 
-        if (&Ed.m_State)
+        // (scene_context::m_State is a reference: always there)
         {
             auto& State = Ed.m_State;
             if (State.m_SelectedEntityScene == SceneGuid)
@@ -521,7 +521,7 @@ namespace xscene::commands
             }
         }
 
-        if (&Ed.m_State) Ed.m_State.m_bEntityInspectorDirty = true;
+        Ed.m_State.m_bEntityInspectorDirty = true;
 
         // Last: undo RecordRemovedChildOverride / ScrubAndShiftPathsAfterRemovedChild on the
         // containing PI (written last by SnapshotSubtreeForRestore).

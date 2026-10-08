@@ -101,7 +101,7 @@ namespace xscene::commands
         pScene->m_RuntimeToLocal[NewEntity.m_Value] = Id;
         Ed.World().m_SceneMgr.MarkEntityDirty(SceneGuid, Id);
 
-        if (&Ed.m_State && Ed.m_State.m_SelectedEntityId == Id && Ed.m_State.m_SelectedEntityScene == SceneGuid)
+        if (Ed.m_State.m_SelectedEntityId == Id && Ed.m_State.m_SelectedEntityScene == SceneGuid)
         {
             Ed.m_State.m_SelectedEntity        = NewEntity;
             Ed.m_State.m_bEntityInspectorDirty = true;

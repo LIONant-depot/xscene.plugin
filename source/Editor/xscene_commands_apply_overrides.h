@@ -582,8 +582,7 @@ namespace xscene::commands
             root_transform_snapshot SavedXform{};
             const bool bHasTransform = ReadTransform(World(), Root, pXformInfo, SavedXform);
             const auto OriginalFolderId = xscene::FindFolderContaining(*pScene, Id);
-            const bool bRootWasSelected = &State()
-                && State().m_SelectedEntityId == Id
+            const bool bRootWasSelected = State().m_SelectedEntityId == Id
                 && State().m_SelectedEntityScene == SceneGuid;
 
             // Rebuild: wipe live instance (no HierarchyDiff bookkeeping — we own the PI root).
