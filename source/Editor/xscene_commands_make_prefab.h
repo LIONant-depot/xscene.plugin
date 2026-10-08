@@ -626,7 +626,7 @@ namespace xscene::commands
                 for (auto Id : ActiveEntitiesOf(It->path()))
                 {
                     const auto File = Folder / L"entity_db" / std::format(L"{:02X}", Id & 0xFF) / std::format(L"{:02X}", (Id >> 8) & 0xFF) / (xecs::scene::FormatPermanentIdW(Id) + L".entity");
-                    if (IsOldInstanceFile(File)) { Out.push_back(std::wcstoull(Folder.stem().c_str(), nullptr, 16)); break; }       // the folder is <guid>.desc
+                    if (IsOldInstanceFile(File)) { Out.push_back(std::wcstoull(Folder.stem().wstring().c_str(), nullptr, 16)); break; }       // the folder is <guid>.desc
                 }
             }
             std::sort(Out.begin(), Out.end());
@@ -651,7 +651,7 @@ namespace xscene::commands
                 ; !Ec && It != std::filesystem::recursive_directory_iterator(); It.increment(Ec))
             {
                 if (It->is_regular_file(Ec) && It->path().filename() == L"Entity.txt")
-                    OldPrefabs.push_back(std::wcstoull(It->path().parent_path().stem().c_str(), nullptr, 16));      // the folder is <guid>.desc
+                    OldPrefabs.push_back(std::wcstoull(It->path().parent_path().stem().wstring().c_str(), nullptr, 16));      // the folder is <guid>.desc
             }
             std::sort(OldPrefabs.begin(), OldPrefabs.end());
 
