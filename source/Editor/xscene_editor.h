@@ -24,6 +24,7 @@
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_apply_overrides.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_commands_make_prefab.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_shared_component_template.h"
+#include "plugins/xscene.plugin/source/Editor/xscene_prefab_override_report.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_entity_inspector_bridge.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_panel_component_selector.h"
 #include "plugins/xscene.plugin/source/Editor/xscene_panel_entity_properties.h"

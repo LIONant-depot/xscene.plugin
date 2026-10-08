@@ -102,6 +102,294 @@ namespace xscene
     }
 
     //---------------------------------------------------------------------------
+    // The prefab section of the Entity Properties, for an entity that is part of a prefab instance: the row of the prefab (the picture, the name and an edit button that opens a menu: Edit In
+    // Context / Edit Alone) and the "Prefab Overrides (n)" button, whose popup lists what the instance does differently (xscene_prefab_override_report.h: the same report the
+    // DescribePrefabOverrides command prints). Everything it does is a command: the popup's rows, Apply, Revert Hierarchy and - after a confirmation - Revert All.
+    //---------------------------------------------------------------------------
+    namespace prefab_section
+    {
+        constexpr const char* kPopupId       = "PrefabOverridesPopup";
+        constexpr const char* kRevertAllId   = "Revert All Overrides?";
+        constexpr float       kListWidth     = 440.0f;
+        constexpr const char* kRevertIcon    = "\xEE\x9E\xA7";        // Segoe MDL2: Undo
+        const ImVec4 AddedColor    = ImVec4(0.45f, 0.82f, 0.50f, 1.0f);
+        const ImVec4 RemovedColor  = ImVec4(0.95f, 0.50f, 0.45f, 1.0f);
+        const ImVec4 ModifiedColor = ImVec4(0.45f, 0.70f, 1.00f, 1.0f);
+
+        inline void Badge(const char* pText, const ImVec4& Color) noexcept
+        {
+            ImGui::TextColored(Color, "%-9s", pText);
+            ImGui::SameLine();
+        }
+
+        // The last item struck through (a removed component or member)
+        inline void StrikeLastItem() noexcept
+        {
+            const ImVec2 A = ImGui::GetItemRectMin(), B = ImGui::GetItemRectMax();
+            const float  Y = (A.y + B.y) * 0.5f;
+            ImGui::GetWindowDrawList()->AddLine(ImVec2(A.x, Y), ImVec2(B.x, Y), ImGui::GetColorU32(ImGuiCol_Text), 1.0f);
+        }
+
+        // A small revert icon in front of a row; true when pressed
+        inline bool RevertIcon(const char* pTip) noexcept
+        {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            const bool bPressed = ImGui::SmallButton(kRevertIcon);
+            ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", pTip);
+            ImGui::SameLine();
+            return bPressed;
+        }
+
+        inline void Command(scene_context& Ed, entity_inspector_bridge& Bridge, const std::string& Text) noexcept
+        {
+            xeditor::Run(Ed.m_Undo, Text);
+            Bridge.m_ReportTime = -1.0;              // the report is built again next frame
+        }
+
+        inline void RenderPopupContents(scene_context& Ed, entity_inspector_bridge& Bridge, bool bReadOnly) noexcept
+        {
+            using kind = prefab_override_component::kind;
+            const auto& R        = Bridge.m_Report;
+            const auto  SceneHex = xscene::commands::FormatSceneGuid(R.m_Scene);
+            const auto  RootHex  = xscene::commands::FormatEntityId(R.m_RootId);
+            if (R.Total() == 0) ImGui::TextDisabled("This instance has no overrides: it is the same as its prefab.");
+
+            ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, 320.0f));
+            if (R.Total() > 0 && ImGui::BeginChild("##overrides", ImVec2(kListWidth, 0.0f), ImGuiChildFlags_AutoResizeY))
+            {
+                for (auto& M : R.m_Members)
+                {
+                    ImGui::PushID(static_cast<int>(M.m_Id ^ (M.m_Id >> 32)));       // keyed on the member, never on where it is in this frame's report: the report is built again while the popup is open
+                    if (M.m_Id == R.m_AskedId) ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
+                    const bool bOpen = ImGui::TreeNodeEx("##member", ImGuiTreeNodeFlags_OpenOnArrow | (M.m_Id == R.m_AskedId ? ImGuiTreeNodeFlags_Selected : 0), "%s", M.m_Name.c_str());
+                    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+                        Command(Ed, Bridge, std::format("Select -Scene {} -Id {}", SceneHex, xscene::commands::FormatEntityId(M.m_Id)));
+                    if (ImGui::IsItemHovered()) xeditor::hint::Text("Select %s%s", M.m_Name.c_str(), M.m_bRoot ? " (the instance's root)" : "");
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", xscene::commands::FormatMemberAddress(M.m_Address).c_str());
+                    if (bOpen)
+                    {
+                        const auto MemberHex = xscene::commands::FormatEntityId(M.m_Id);
+                        for (auto& C : M.m_Components)
+                        {
+                            const auto Guid = std::format("{:016X}", C.m_Guid);
+                            ImGui::PushID(Guid.c_str());
+                            if (C.m_Kind == kind::Added)
+                            {
+                                ImGui::BeginDisabled(bReadOnly);
+                                if (RevertIcon("Remove this component: the prefab does not have it")) Command(Ed, Bridge, std::format("RemoveComponent -Scene {} -Id {} -Component {}", SceneHex, MemberHex, Guid));
+                                ImGui::EndDisabled();
+                                Badge("Added", AddedColor);
+                                ImGui::TextUnformatted(C.m_Name.c_str());
+                            }
+                            else if (C.m_Kind == kind::Removed)
+                            {
+                                ImGui::Dummy(ImVec2(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x, 0.0f)); ImGui::SameLine(0.0f, 0.0f);
+                                Badge("Removed", RemovedColor);
+                                ImGui::TextUnformatted(C.m_Name.c_str());
+                                StrikeLastItem();
+                                if (ImGui::IsItemHovered()) xeditor::hint::Text("The prefab has this component, the instance removed it.\nRevert All brings it back.");
+                            }
+                            else
+                            {
+                                ImGui::Dummy(ImVec2(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x, 0.0f)); ImGui::SameLine(0.0f, 0.0f);
+                                Badge(std::format("Modified ({})", C.m_Properties.size()).c_str(), ModifiedColor);
+                                const bool bPropsOpen = ImGui::TreeNodeEx("##component", 0, "%s", C.m_Name.c_str());
+                                if (bPropsOpen)
+                                {
+                                    for (auto& P : C.m_Properties)
+                                    {
+                                        ImGui::PushID(P.m_Path.c_str());
+                                        ImGui::BeginDisabled(bReadOnly);
+                                        if (RevertIcon("Revert this property to the prefab's value"))
+                                            Command(Ed, Bridge, std::format("RevertOverride -Scene {} -Id {} -Component {} -Path {} -TypeGuid {:08X} -Before {} -After {}", SceneHex, MemberHex, Guid
+                                                , xeditor::Quote(P.m_Path), P.m_TypeGuid, xeditor::Quote(P.m_New), xeditor::Quote(P.m_Old)));
+                                        ImGui::EndDisabled();
+                                        ImGui::TextUnformatted(P.m_Path.c_str());
+                                        ImGui::SameLine(0.0f, 4.0f);
+                                        ImGui::TextDisabled(":");
+                                        ImGui::SameLine(0.0f, 4.0f);
+                                        ImGui::TextColored(RemovedColor, "%s", P.m_Old.c_str());
+                                        ImGui::SameLine(0.0f, 4.0f);
+                                        ImGui::TextDisabled("->");
+                                        ImGui::SameLine(0.0f, 4.0f);
+                                        ImGui::TextColored(AddedColor, "%s", P.m_New.c_str());
+                                        ImGui::PopID();
+                                    }
+                                    ImGui::TreePop();
+                                }
+                            }
+                            ImGui::PopID();
+                        }
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+
+                if (!R.m_Hierarchy.empty())
+                {
+                    ImGui::SeparatorText("Hierarchy");
+                    int i = 0;
+                    for (auto& H : R.m_Hierarchy)
+                    {
+                        ImGui::PushID(i++);
+                        if (H.m_bAdded)
+                        {
+                            Badge("Added", AddedColor);
+                            if (ImGui::Selectable(H.m_Name.c_str(), H.m_Id == R.m_AskedId, ImGuiSelectableFlags_AllowOverlap))
+                                Command(Ed, Bridge, std::format("Select -Scene {} -Id {}", SceneHex, xscene::commands::FormatEntityId(H.m_Id)));
+                            if (ImGui::IsItemHovered()) xeditor::hint::Text("A child of the scene under %s: it is not part of the prefab.\nApply adds it to the prefab, Revert Hierarchy deletes it.", xscene::commands::FormatMemberAddress(H.m_Address).c_str());
+                        }
+                        else
+                        {
+                            Badge("Removed", RemovedColor);
+                            ImGui::TextUnformatted(H.m_Name.c_str());
+                            StrikeLastItem();
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("%s", xscene::commands::FormatMemberAddress(H.m_Address).c_str());
+                            if (ImGui::IsItemHovered()) xeditor::hint::Text("The prefab has this child, the instance removed it.\nRevert Hierarchy brings it back.");
+                        }
+                        ImGui::PopID();
+                    }
+                }
+
+                if (!R.m_Orphans.empty())
+                {
+                    ImGui::SeparatorText(std::format("Orphans ({})", R.m_Orphans.size()).c_str());
+                    for (auto& O : R.m_Orphans) ImGui::TextDisabled("%s  %s", xscene::commands::FormatMemberAddress(O.m_Address).c_str(), O.m_Text.c_str());
+                    ImGui::BeginDisabled(bReadOnly);
+                    if (ImGui::Button("Remove orphan overrides")) Command(Ed, Bridge, std::format("RemoveOrphanOverrides -Scene {} -Id {}", SceneHex, RootHex));
+                    ImGui::EndDisabled();
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("These overrides name a member the prefab no longer has. They change nothing; this takes them away.");
+                }
+            }
+            if (R.Total() > 0) ImGui::EndChild();
+
+            // The three actions of the instance
+            ImGui::Separator();
+            ImGui::BeginDisabled(bReadOnly || R.Total() == 0);
+            if (ImGui::Button("Revert All"))
+            {
+                Bridge.m_bAskRevertAll   = true;
+                Bridge.m_RevertAllCommand = std::format("RevertAllOverrides -Scene {} -Id {}", SceneHex, RootHex);
+                Bridge.m_RevertAllText    = std::format("Revert all overrides of {}?\n{} change{} will be undone (you can undo this).", R.m_RootName, R.Total(), R.Total() == 1 ? "" : "s");
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Revert All\nRe-sync from Prefab (keeps root Transform); clears all overrides");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(bReadOnly || R.HierarchyCount() == 0);
+            if (ImGui::Button("Revert Hierarchy")) Command(Ed, Bridge, std::format("RevertHierarchyOverrides -Scene {} -Id {}", SceneHex, RootHex));
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Revert Hierarchy\nRestore removed children / drop added children; leave property overrides");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(bReadOnly || R.Total() == 0);
+            if (ImGui::Button("Apply")) Command(Ed, Bridge, std::format("ApplyOverrides -Scene {} -Id {}", SceneHex, RootHex));
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Apply\nPush all overrides on this prefab instance into the Prefab asset");
+        }
+
+        // The whole section for the selected entity; clears what the headers read when the entity is not part of an instance.
+        inline void Render(scene_context& Ed, entity_inspector_bridge& Bridge, const ImVec2& RowSpacing, bool bReadOnly) noexcept
+        {
+            auto& GameMgr = Ed.World();
+            auto& State   = Ed.m_State;
+            Bridge.m_AddedComponents.clear();
+            Bridge.m_ModifiedComponents.clear();
+
+            const auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, State.m_SelectedEntity);
+            if (Ctx.m_pPI == nullptr || Ctx.m_RootId == xecs::scene::invalid_permanent_id_v || Ctx.m_pScene == nullptr)
+            {
+                Bridge.m_Report = {};
+                Bridge.m_ReportTime = -1.0;
+                return;
+            }
+
+            // The report: again when the selection changed, a command of the popup ran, or half a second passed
+            const double Now = ImGui::GetTime();
+            if (Bridge.m_ReportTime < 0.0 || Now - Bridge.m_ReportTime > 0.5 || Bridge.m_ReportAsked != State.m_SelectedEntityId || !(Bridge.m_ReportScene == State.m_SelectedEntityScene))
+            {
+                Bridge.m_Report      = BuildPrefabOverrideReport(GameMgr, State.m_SelectedEntityScene, State.m_SelectedEntityId);
+                Bridge.m_ReportTime  = Now;
+                Bridge.m_ReportAsked = State.m_SelectedEntityId;
+                Bridge.m_ReportScene = State.m_SelectedEntityScene;
+            }
+            const auto& R = Bridge.m_Report;
+            if (!R.m_bValid) { ImGui::TextDisabled("Prefab: %s", R.m_Error.c_str()); return; }
+            for (auto& M : R.m_Members)
+                if (M.m_Id == State.m_SelectedEntityId)
+                    for (auto& C : M.m_Components)
+                        (C.m_Kind == prefab_override_component::kind::Added ? Bridge.m_AddedComponents : Bridge.m_ModifiedComponents).insert(C.m_Guid);
+
+            // The prefab, as a resource row that can be looked at and edited from here but never replaced: no picker, no clear, no drop
+            const auto  SceneHex = xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene);
+            const auto  RootHex  = xscene::commands::FormatEntityId(Ctx.m_RootId);
+            const auto  PrefabV  = Ctx.m_pPI->m_PrefabInstance.m_Instance.m_Value;
+            xresource_editor::resource_reference_options Options;
+            Options.m_bReadOnly = true;
+            Options.m_ItemSpacing = RowSpacing;
+            const ImVec2 NormalSpacing = ImGui::GetStyle().ItemSpacing;
+            Options.m_pEditTip  = "Edit the prefab of this instance";
+            Options.m_EditMenuSize = ImVec2(ImGui::CalcTextSize("Edit In Context").x + 2.0f * ImGui::GetStyle().WindowPadding.x + 2.0f * ImGui::GetStyle().ItemSpacing.x + 24.0f, 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y) + 2.0f * ImGui::GetStyle().WindowPadding.y);
+            Options.m_EditMenu  = [&]
+            {
+                const auto Entry = [&](const char* pLabel, bool bInContext, const std::string& Command, const char* pHint)
+                {
+                    const std::string Why = Ed.m_WhyNotEditPrefab ? Ed.m_WhyNotEditPrefab(bInContext, PrefabV) : std::string();
+                    const bool        bCan = (bInContext ? static_cast<bool>(Ed.m_QueueCommand) : static_cast<bool>(Ed.m_QueueOpenPrefab)) && Why.empty();
+                    if (ImGui::MenuItem(pLabel, nullptr, false, bCan)) { if (bInContext) Ed.m_QueueCommand(Command); else Ed.m_QueueOpenPrefab(PrefabV); }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("%s", Why.empty() ? pHint : Why.c_str());
+                };
+                Entry("Edit In Context", true, std::format("EditInContext -Scene {} -Id {}", SceneHex, RootHex), "Opens the prefab in its own editor, placed where this instance is, with the Level around it (faded, not pickable). Save brings every instance up to date.");
+                Entry("Edit Alone",      false, std::string(), "Opens the prefab in its own editor, by itself. Save brings every instance up to date.");
+            };
+            // The button is the first of the buttons under the prefab's name (left of locate and edit); it and its popups are drawn by the row, in its id scope
+            Options.m_Lead = [&](float Width)
+            {
+                // Prefab Overrides (n): greyed with none, and still opens (to say so)
+                const int N = R.Total();
+                if (N == 0) ImGui::PushStyleColor(ImGuiCol_Text, xeditor::ReadOnlyTextColor());
+                if (ImGui::Button(std::format("Prefab Overrides ({})###PrefabOverridesButton", N).c_str(), ImVec2(Width, 0.0f)))
+                {
+                    ImGui::OpenPopup(kPopupId);
+                    Bridge.m_ReportTime = -1.0;
+                }
+                if (N == 0) ImGui::PopStyleColor();
+                const ImVec2 AnchorMin = ImGui::GetItemRectMin(), AnchorMax = ImGui::GetItemRectMax();        // the button
+                if (ImGui::IsItemHovered())
+                    xeditor::hint::Text(N == 0 ? "This instance has no overrides: it is the same as its prefab." : "What this instance does differently from its prefab: components added or removed, properties changed, children removed or added.\nClick for the list, and to Apply or Revert.");
+
+                if (ImGui::IsPopupOpen(kPopupId))                                                  // under the button, not under the mouse; kept inside the window (xeditor::popup::PlaceUnder)
+                    xeditor::popup::PlaceUnder(AnchorMin, AnchorMax, ImVec2(kListWidth + 2.0f * ImGui::GetStyle().WindowPadding.x, 380.0f));
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, NormalSpacing);                    // the row is drawn with the Inspector's tight spacing; the popup is a window of its own
+                if (ImGui::BeginPopup(kPopupId))
+                {
+                    RenderPopupContents(Ed, Bridge, bReadOnly);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopStyleVar();
+
+                // Revert All asks first (the popup closed): the command is undoable, the question is only the interface's
+                if (Bridge.m_bAskRevertAll) { ImGui::OpenPopup(kRevertAllId); Bridge.m_bAskRevertAll = false; }
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, NormalSpacing);
+                if (xeditor::BeginModal(kRevertAllId))
+                {
+                    ImGui::TextUnformatted(Bridge.m_RevertAllText.c_str());
+                    ImGui::Spacing();
+                    if (ImGui::Button("Revert", ImVec2(110.0f, 0.0f))) { Command(Ed, Bridge, Bridge.m_RevertAllCommand); ImGui::CloseCurrentPopup(); }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Cancel", ImVec2(110.0f, 0.0f))) ImGui::CloseCurrentPopup();
+                    ImGui::EndPopup();
+                }
+                ImGui::PopStyleVar();
+            };
+            bool bOpenName = false, bClear = false;
+            xresource_editor::RenderResourceReferenceRow(&Bridge.m_Report, Ctx.m_pPI->m_PrefabInstance, false, Options, bOpenName, bClear);
+        }
+    }
+
+    //---------------------------------------------------------------------------
     // Entity Properties panel - the selected entity's components, plus Add/Remove Component and
     // (when applicable) prefab-override actions. Owns its own ImGui::Begin/End. Bridge carries the
     // inspector-to-override-tracking state (see entity_inspector_bridge's own comment) - construct
@@ -161,12 +449,12 @@ namespace xscene
                     constexpr const char* kAddComponentPopupId = "AddComponentPopup";
                     if (ImGui::Button("Add Component"))
                         ImGui::OpenPopup(kAddComponentPopupId);
-                    const ImVec2 AddPopupPos(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y);        // under the button
+                    const ImVec2 AddAnchorMin = ImGui::GetItemRectMin(), AddAnchorMax = ImGui::GetItemRectMax();        // the button
                     // Drop a SharedComponentTemplate resource here to add+intern from serialized values.
                     if (xscene::TryAcceptSharedComponentTemplateDrop(Ed))
                         RefreshEntityView();
 
-                    if (ImGui::IsPopupOpen(kAddComponentPopupId)) ImGui::SetNextWindowPos(AddPopupPos);    // aligned to the button, not to the mouse (the size is the list's: xeditor/grouped_list.h)
+                    if (ImGui::IsPopupOpen(kAddComponentPopupId)) xeditor::popup::PlaceUnder(AddAnchorMin, AddAnchorMax, ImVec2(320.0f, 360.0f));    // under the button, not under the mouse; kept inside the window (the size is the list's: xeditor/grouped_list.h)
                     if (ImGui::BeginPopup(kAddComponentPopupId))
                     {
                         if (xscene::RenderComponentSelectorPopupContents(Ed, State.m_SelectedEntity))
@@ -199,65 +487,8 @@ namespace xscene
                 // Prefabs are created by dragging an entity from the Level Editor tree onto a folder
                 // in the asset browser (see xscene::entity_to_prefab_drop) - Unity-style, no button.
 
-// Unity-style Apply / Revert for instance overrides. Shown when the selection is
-                // under a prefab instance that has property overrides and/or HierarchyDiffs.
-                if (auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, State.m_SelectedEntity); Ctx.m_pPI
-                    && (!Ctx.m_pPI->m_lComponents.empty() || !Ctx.m_pPI->m_HierarchyDiffs.empty()))
-                {
-                    if (auto RootIt = pScene->m_RuntimeToLocal.find(Ctx.m_RootEntity.m_Value); RootIt != pScene->m_RuntimeToLocal.end())
-                    {
-                        const auto SceneHex = xscene::commands::FormatSceneGuid(State.m_SelectedEntityScene);
-                        const auto RootHex  = xscene::commands::FormatEntityId(RootIt->second);
-
-                        if (!Ctx.m_pPI->m_lComponents.empty() || !Ctx.m_pPI->m_HierarchyDiffs.empty())
-                        {
-                            if (ImGui::Button("Apply"))
-                            {
-                                xeditor::Run(Ed.m_Undo, std::format("ApplyOverrides -Scene {} -Id {}", SceneHex, RootHex));
-                            }
-                            // Tooltip (only show when hovering) â€” same format as Play transport buttons
-                            if (ImGui::IsItemHovered())
-                            {
-                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
-                                ImGui::Text("Apply");
-                                ImGui::TextDisabled("Push all overrides on this prefab instance into the Prefab asset");
-                                ImGui::EndTooltip();
-                            }
-                        }
-                        if (!Ctx.m_pPI->m_HierarchyDiffs.empty())
-                        {
-                            ImGui::SameLine();
-                            if (ImGui::Button("Revert Hierarchy"))
-                            {
-                                xeditor::Run(Ed.m_Undo, std::format("RevertHierarchyOverrides -Scene {} -Id {}", SceneHex, RootHex));
-                            }
-                            if (ImGui::IsItemHovered())
-                            {
-                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
-                                ImGui::Text("Revert Hierarchy");
-                                ImGui::TextDisabled("Restore removed children / drop added children; leave property overrides");
-                                ImGui::EndTooltip();
-                            }
-                        }
-                        if (!Ctx.m_pPI->m_lComponents.empty()
-                            || !Ctx.m_pPI->m_ComponentDiffs.empty()
-                            || !Ctx.m_pPI->m_HierarchyDiffs.empty())
-                        {
-                            ImGui::SameLine();
-                            if (ImGui::Button("Revert All"))
-                            {
-                                xeditor::Run(Ed.m_Undo, std::format("RevertAllOverrides -Scene {} -Id {}", SceneHex, RootHex));
-                            }
-                            if (ImGui::IsItemHovered())
-                            {
-                                xeditor::hint::PlaceAwayFromEdges(16.0f, ImVec2(380.0f, 220.0f)); ImGui::BeginTooltip();
-                                ImGui::Text("Revert All");
-                                ImGui::TextDisabled("Re-sync from Prefab (keeps root Transform); clears all overrides");
-                                ImGui::EndTooltip();
-                            }
-                        }
-                    }
-                }
+                // The prefab of an instance (its row and the Prefab Overrides button, with its popup: what the instance does differently, Apply, Revert Hierarchy, Revert All)
+                xscene::prefab_section::Render(Ed, Bridge, EntityInspector.m_Settings.m_ItemSpacing, bReadOnly);
 
                 ImGui::Separator();
 

@@ -287,6 +287,7 @@ namespace xscene::commands
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "AddComponent: unknown component";
+            if (xecs::component::type::IsComponentType<xecs::editor::prefab_instance>(pInfo)) return "AddComponent: the prefab instance is the editor's own bookkeeping (made by InstantiatePrefab / MakePrefab), not a component to add";
 
             std::array<const xecs::component::type::info*, 1> Add{ pInfo };
             if (!MigrateEntityComponents(SceneContext(), SceneGuid, Id, Add, {}).isValid()) return "AddComponent: target not found";
@@ -357,6 +358,7 @@ namespace xscene::commands
 
             auto* pInfo = xlioncore::Ecs(World()).FindComponentType(xecs::component::type::guid{ CompGuid });
             if (!pInfo) return "RemoveComponent: unknown component";
+            if (xecs::component::type::IsComponentType<xecs::editor::prefab_instance>(pInfo)) return "RemoveComponent: the prefab instance is the editor's own bookkeeping, not a component to remove";
 
             if (auto* pScene = World().m_SceneMgr.Find(SceneGuid); pScene)
                 if (auto It = pScene->m_LocalToRuntime.find(Id); It != pScene->m_LocalToRuntime.end())

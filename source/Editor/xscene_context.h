@@ -46,6 +46,12 @@ namespace xscene
         component_display*                         m_pDisplay = nullptr;     // what this editor knows about its types (its game module's categories and sources), set by its session
         // A prefab was just made from this editor's world (MakePrefab, MakePrefabVariant): the editor that knows what Game the work is done under gives the prefab that Game to play with (prefabs_plan.md, D2).
         std::function<void(xresource::full_guid)>  m_OnPrefabMade;
+        // The editor opens another editor for the prefab of an instance (the prefab row of the Entity Properties: Edit In Context, Edit Alone). A scene editor knows nothing of editors or levels, so the host gives it:
+        // m_QueueCommand - a command of this editor run at a clean point of the frame, with the same queue the Level Tree's "Edit in Context" uses (an editor cannot be made while the panels draw);
+        // m_WhyNotEditPrefab - empty when the action is allowed, else why not (the entry is disabled and says it): bInContext false is Edit Alone; the prefab's guid value.
+        std::function<void(std::string)>           m_QueueCommand;
+        std::function<std::string(bool, std::uint64_t)> m_WhyNotEditPrefab;
+        std::function<void(std::uint64_t)>         m_QueueOpenPrefab;         // Edit Alone: the prefab (its guid value) opens in an editor of its own at the clean point of the frame, as a double click on it in the Asset Browser does (OpenPrefab is a workspace command, not one of the editor's own)
 
         xecs::game_mgr::instance& World() noexcept { return *m_pWorld; }
         const component_display& Display() const noexcept { static const component_display s_Nothing; return m_pDisplay ? *m_pDisplay : s_Nothing; }

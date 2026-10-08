@@ -54,6 +54,22 @@ namespace xscene
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view, const xproperty::any&, bool&)> m_OnOverrideCheck;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view)>                              m_OnOverrideReset;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*)>                                                m_OnComponentHeaderRender;
+        std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, ImVec4&, bool&)>                                m_OnComponentHeaderColor;
+
+        // The components of the selected entity that differ from its prefab (set by the Entity Properties from its Prefab Overrides report, every frame): the header of an ADDED component
+        // is tinted grey-blue, a MODIFIED one gets a thin blue mark at its left. A removed component has no header (it is only in the popup).
+        // The Prefab Overrides report of the instance the selection belongs to, kept between frames (built again when the selection changes, after a command of the popup, and twice a second: it walks the instance)
+        prefab_override_report            m_Report;
+        double                            m_ReportTime     = -1.0;
+        xecs::scene::guid                 m_ReportScene;
+        xecs::scene::permanent_id         m_ReportAsked    = xecs::scene::invalid_permanent_id_v;
+        bool                              m_bAskRevertAll  = false;          // "Revert All" was pressed in the popup: the confirmation opens (outside the popup, which closes)
+        std::string                       m_RevertAllCommand;                // what the confirmation runs, and what it says
+        std::string                       m_RevertAllText;
+        std::unordered_set<std::uint64_t> m_AddedComponents;
+        std::unordered_set<std::uint64_t> m_ModifiedComponents;
+        static inline const ImVec4 kAddedHeaderColor = ImVec4(0.30f, 0.40f, 0.52f, 1.0f);     // grey-blue, one colour for every theme: the instance's own components stand out from the prefab's
+        static constexpr ImU32 kModifiedMarkColor = IM_COL32(70, 150, 255, 255);
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view, const xproperty::any&, bool&)> m_OnEntityReferenceRender;
 
         // The "fake pointer, resolved by callback" indirection xproperty's own inspector expects
@@ -89,6 +105,7 @@ namespace xscene
             Inspector.m_OnOverrideCheck.m_Delegates.clear();
             Inspector.m_OnOverrideReset.m_Delegates.clear();
             Inspector.m_OnComponentHeaderRender.m_Delegates.clear();
+            Inspector.m_OnComponentHeaderColor.m_Delegates.clear();
             Inspector.m_OnCustomRenderReplaceValue.m_Delegates.clear();
             Inspector.m_OnGetComponentPointer.m_Delegates.clear();
 
@@ -161,6 +178,9 @@ namespace xscene
 
                 auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, State.m_SelectedEntity);
                 if (Ctx.m_pPI == nullptr) return;
+                // A component the instance added has no value in the prefab to go back to: its data is the instance's own (the recipe keeps it as overrides of every property so that it is saved), not a difference
+                // from the prefab, and a marker there would be one that cannot be reverted (the header's colour and the popup's "Added" row say it; removing the component is its revert).
+                if (m_AddedComponents.contains(It->second->m_Guid.m_Value)) return;
 
                 for (auto& C : Ctx.m_pPI->m_lComponents)
                 {
@@ -225,7 +245,11 @@ namespace xscene
                 {
                     if (Path == pPropertyName) { CurrentValue = std::move(Data); bFoundCurrent = true; }
                 });
-                if (bFoundBase == false || bFoundCurrent == false) return;
+                if (bFoundBase == false || bFoundCurrent == false)
+                {
+                    xeditor::NotifyToast(std::format("{} has no value in the prefab to go back to (the component is not the prefab's, or the property is not saved with it).", std::string(Path)));
+                    return;
+                }
 
                 std::array<char, 256> BeforeBuffer{}, AfterBuffer{};
                 const auto BeforeLen = xscene::commands::FormatPropertyValue(BeforeBuffer, CurrentValue);
@@ -259,6 +283,16 @@ namespace xscene
                 auto It = m_ComponentMap.find(pInstance);
                 if (It == m_ComponentMap.end()) return;
                 auto* pInfo = It->second;
+                // A component whose properties differ from the prefab's: a thin blue mark at the left edge of its header (the added ones have their own colour)
+                if (!m_ModifiedComponents.empty() && m_ModifiedComponents.contains(pInfo->m_Guid.m_Value))
+                {
+                    const ImVec2 Pos = ImGui::GetCursorScreenPos();
+                    const float  X   = ImGui::GetWindowPos().x + 1.0f;
+                    auto* pDraw = ImGui::GetWindowDrawList();                      // the header is in the second column, whose clip rectangle would cut the mark at the window's edge
+                    pDraw->PushClipRectFullScreen();
+                    pDraw->AddRectFilled(ImVec2(X, Pos.y), ImVec2(X + 3.0f, Pos.y + ImGui::GetFrameHeight()), kModifiedMarkColor);
+                    pDraw->PopClipRect();
+                }
                 if (xscene::IsInternalComponent(pInfo)) return;
                 // Name is a regular, removable component like any other now - an entity with none of
                 // its own components at all (not even Name) is a legitimate state.
@@ -373,6 +407,16 @@ namespace xscene
                 }
             };
             Inspector.m_OnComponentHeaderRender.Register(m_OnComponentHeaderRender);
+
+            m_OnComponentHeaderColor = [this](xproperty::inspector&, const xproperty::type::object&, void* pInstance, ImVec4& Color, bool& bSet)
+            {
+                if (m_AddedComponents.empty()) return;
+                auto It = m_ComponentMap.find(pInstance);
+                if (It == m_ComponentMap.end() || !m_AddedComponents.contains(It->second->m_Guid.m_Value)) return;
+                Color = kAddedHeaderColor;
+                bSet  = true;
+            };
+            Inspector.m_OnComponentHeaderColor.Register(m_OnComponentHeaderColor);
 
             // Custom render for ANY xecs::component::entity-valued property (today, only
             // xecs::component::entity_reference::m_Target - but this is a value-type check, not a

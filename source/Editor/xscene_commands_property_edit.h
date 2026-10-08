@@ -346,6 +346,9 @@ namespace xscene::commands
 
             const auto Target = ResolvePropertyTarget(SceneContext(), SceneGuid, Id, CompGuid);
             if (!Target.m_pInfo) return "SetProperty: target not found";
+            // The prefab instance component (a recipe and the prefab it names) is the editor's own bookkeeping, not a property to edit: the Inspector does not show it, and a value written here would
+            // move the instance to another prefab (or abort). The prefab of an instance is shown read only. Every other component stays editable (Parent's Follow axes, ...).
+            if (xecs::component::type::IsComponentType<xecs::editor::prefab_instance>(Target.m_pInfo)) return "SetProperty: the prefab instance is the editor's own bookkeeping, not a property to edit (the prefab of an instance cannot be changed)";
             if (std::holds_alternative<xerr>(TypeArg))                                   // the type of the property is the editor's to know
             {
                 std::string CurrentValue;
