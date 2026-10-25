@@ -52,6 +52,7 @@ namespace xscene
 
         std::function<void(xproperty::inspector&, const xproperty::ui::undo::cmd&)>                                                      m_OnPropertyChanged;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view, const xproperty::any&, bool&)> m_OnOverrideCheck;
+        std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, void*&)> m_OnBaseInstance;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, std::string_view)>                              m_OnOverrideReset;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*)>                                                m_OnComponentHeaderRender;
         std::function<void(xproperty::inspector&, const xproperty::type::object&, void*, ImVec4&, bool&)>                                m_OnComponentHeaderColor;
@@ -103,6 +104,7 @@ namespace xscene
             // owns, not just the one xresource_editor happened to need it for.
             Inspector.m_OnChangeEvent.m_Delegates.clear();
             Inspector.m_OnOverrideCheck.m_Delegates.clear();
+            Inspector.m_OnBaseInstance.m_Delegates.clear();
             Inspector.m_OnOverrideReset.m_Delegates.clear();
             Inspector.m_OnComponentHeaderRender.m_Delegates.clear();
             Inspector.m_OnComponentHeaderColor.m_Delegates.clear();
@@ -270,6 +272,23 @@ namespace xscene
                     ));
             };
             Inspector.m_OnOverrideReset.Register(m_OnOverrideReset);
+
+            // A property that keeps its own override state (member_override_state: a Mesh's material parameters) stacks a prefab instance over its
+            // prefab: its base is the prefab's member at the same address as an instance starts from it (the baked member), the same component
+            m_OnBaseInstance = [this, &Ed](xproperty::inspector&, const xproperty::type::object&, void* pInstance, void*& pBase)
+            {
+                pBase = nullptr;
+                auto It = m_ComponentMap.find(pInstance);
+                if (It == m_ComponentMap.end()) return;
+                auto& GameMgr = Ed.World();
+                auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, Ed.m_State.m_SelectedEntity);
+                if (Ctx.m_pPI == nullptr || m_AddedComponents.contains(It->second->m_Guid.m_Value)) return;
+                if (xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(Ctx.m_pPI->m_PrefabInstance)) return;
+                auto Base = xlioncore::Ecs(GameMgr).ResolveBakedPrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                if (Base.isValid() == false) Base = xlioncore::Ecs(GameMgr).ResolvePrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                if (Base.isValid()) pBase = xscene::ResolveComponentPointer(GameMgr, Base, *It->second);
+            };
+            Inspector.m_OnBaseInstance.Register(m_OnBaseInstance);
 
             // "[X]" on a component's own header row - resolves back to which xECS component this is via
             // the SAME m_ComponentMap the property callbacks above already use, so it stays in sync

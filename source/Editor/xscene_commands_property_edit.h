@@ -190,15 +190,10 @@ namespace xscene::commands
             }
         }
 
+        // The latest edit goes last: an instance applies its overrides in order, so one property that sets several (a Mesh parameter's
+        // Override text after an edit of one of its channels) ends as it was edited
         auto& CompOverride = xscene::FindOrCreateOverrideEntry(*Ctx.m_pPI, Target.m_pInfo->m_Guid.m_Value, Ctx.m_Member);
-        for (auto& O : CompOverride.m_PropertyOverrides)
-        {
-            if (O.m_PropertyName == Path)
-            {
-                O.m_PropertyValueAsString = ValueStr;
-                return;
-            }
-        }
+        std::erase_if(CompOverride.m_PropertyOverrides, [&](const xecs::editor::prefab_property_override& O) { return O.m_PropertyName == Path; });
         CompOverride.m_PropertyOverrides.push_back(xecs::editor::prefab_property_override{ .m_PropertyName = Path, .m_PropertyValueAsString = ValueStr });
     }
 
@@ -303,6 +298,77 @@ namespace xscene::commands
             std::string   Text;
             if (!ReadPropertyText(Target, std::get<std::string>(PathArg), TypeGuid, Text)) return "GetProperty: no such property";
             return Text;
+        }
+        xcmdline::parser::handle m_hScene, m_hId, m_hComponent, m_hPath;
+    };
+
+    //================================================================================================
+    // OverrideState - what the Inspector's override marker (>) says of a property that keeps its own override state (member_override_state: a Mesh's
+    // material slots and parameters): whether it is overridden, whether a prefab is one of its levels, and each revert it offers - the label, and the
+    // SetProperty that does it. The same callback the Inspector calls, with the same base (the prefab's member, for a prefab instance's entity).
+    //================================================================================================
+    struct override_state_query_cmd : scene_query_command
+    {
+        override_state_query_cmd(xundo::system& System, void* pDataBase) noexcept : scene_query_command(System, "OverrideState", pDataBase) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override
+        {
+            return "Says what the Inspector's override marker says of a property that keeps its own override state (a Mesh slot's Material, a row of its Parameters): Overridden, Prefab (whether a prefab is a level it inherits through), and each revert on offer with the property it sets and the value (do it with SetProperty). Usage: OverrideState -Scene hexguid -Id hexid -Component name|hex64 -Path property/path";
+        }
+        void RegisterArguments() noexcept override
+        {
+            m_hScene     = m_Parser.addOption("Scene",     "Scene guid, 16 hex digits",                               true, 1);
+            m_hId        = m_Parser.addOption("Id",        "Entity permanent_id, 8 or 16 hex digits",                 true, 1);
+            m_hComponent = m_Parser.addOption("Component", "Component name (Mesh) or type guid, 16 hex digits",       true, 1);
+            m_hPath      = m_Parser.addOption("Path",      "Property path (Mesh/Slots[G:0]/Parameters[G:2], Mesh/Slots[G:0]/Material)", true, 1);
+        }
+        std::string Query() noexcept override
+        {
+            auto SceneArg = m_Parser.getOptionArgAs<std::string>(m_hScene, 0);
+            auto IdArg    = m_Parser.getOptionArgAs<std::string>(m_hId, 0);
+            auto CompArg  = m_Parser.getOptionArgAs<std::string>(m_hComponent, 0);
+            auto PathArg  = m_Parser.getOptionArgAs<std::string>(m_hPath, 0);
+            if (std::holds_alternative<xerr>(SceneArg) || std::holds_alternative<xerr>(IdArg) || std::holds_alternative<xerr>(CompArg) || std::holds_alternative<xerr>(PathArg))
+                return "OverrideState: bad arguments";
+            const auto Comp = ParseComponentArg(SceneContext(), std::get<std::string>(CompArg));
+            if (!Comp) return "OverrideState: unknown component";
+            const auto Target = ResolvePropertyTarget(SceneContext(), ParseSceneGuid(std::get<std::string>(SceneArg)), ParseEntityId(std::get<std::string>(IdArg)), Comp);
+            if (!Target.m_pInfo || !Target.m_pInfo->m_pPropertyTable) return "OverrideState: target not found";
+            const std::string Path = std::get<std::string>(PathArg);
+
+            // the property (or the nearest one above it) that keeps its own state
+            const xproperty::settings::member_override_state_t* pState = nullptr;
+            std::size_t                                          Best   = 0;
+            xproperty::settings::context                         Context;
+            xproperty::sprop::collector(Target.m_pInstance, *Target.m_pInfo->m_pPropertyTable, Context, [&](const char* pName, xproperty::any&&, const xproperty::type::members& Member, bool, const void*) noexcept
+            {
+                const std::string_view Name = pName;
+                const bool bAbove = Path == Name || (Path.size() > Name.size() && Path.starts_with(Name) && (Path[Name.size()] == '/' || Path[Name.size()] == '['));
+                if (!bAbove || Name.size() < Best) return;
+                if (const auto* p = Member.getUserData<xproperty::settings::member_override_state_t>()) { pState = p; Best = Name.size(); }
+            }, true);
+            if (pState == nullptr) return std::format("OverrideState: {} keeps no override state of its own (its prefab overrides: DescribePrefabOverrides)", Path);
+
+            // its base: the prefab's member, as the Inspector's (entity_inspector_bridge::m_OnBaseInstance)
+            void* pBase = nullptr;
+            auto& GameMgr = World();
+            if (auto Ctx = xscene::FindContainingPrefabInstance(GameMgr, Target.m_Entity); Ctx.m_pPI && !xlioncore::Ecs(GameMgr).EnsureLoadedPrefab(Ctx.m_pPI->m_PrefabInstance))
+            {
+                auto Base = xlioncore::Ecs(GameMgr).ResolveBakedPrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                if (Base.isValid() == false) Base = xlioncore::Ecs(GameMgr).ResolvePrefabMember(Ctx.m_pPI->m_PrefabInstance, Ctx.m_Member);
+                if (const xecs::component::type::info* pI = nullptr; Base.isValid()) pBase = xlioncore::Ecs(GameMgr).ResolveComponent(Base, Target.m_pInfo->m_Guid, pI);
+            }
+
+            bool bOverridden = false;
+            std::vector<xproperty::settings::member_override_state_t::revert> Choices;
+            pState->m_pCallback(*Target.m_pInfo->m_pPropertyTable, Target.m_pInstance, pBase, Path, bOverridden, &Choices);
+            std::string Out = std::format("OverrideState: {}\nOverridden={}\nPrefab={}\n", Path, bOverridden ? "true" : "false", pBase ? "true" : "false");
+            for (const auto& R : Choices)
+            {
+                std::array<char, 256> Buffer{};
+                const auto Len = FormatPropertyValue(Buffer, R.m_After);
+                Out += std::format("Revert \"{}\": -Path {} -After \"{}\"\n", R.m_Label, R.m_Path, std::string(Buffer.data(), Len > 0 ? static_cast<std::size_t>(Len) : 0));
+            }
+            return Out;
         }
         xcmdline::parser::handle m_hScene, m_hId, m_hComponent, m_hPath;
     };
