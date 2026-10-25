@@ -58,6 +58,7 @@ namespace xscene
                 && pInfo->m_TypeID != xecs::component::type::id::SHARE
                 && pInfo->m_TypeID != xecs::component::type::id::TAG) continue;
             if (xscene::IsInternalComponent(pInfo) || xscene::IsEditorStateComponent(pInfo)) continue;       // the editor's own state is the Level Tree's (power and eye)
+            if (auto It = Ed.Display().m_Categories.find(pInfo->m_pName); It != Ed.Display().m_Categories.end() && It->second.m_Category == "Deprecated") continue;     // kept to read old files only
             if (Bits.Has(pInfo->m_Guid.m_Value)) continue;
 
             xeditor::grouped_list_item Item;
