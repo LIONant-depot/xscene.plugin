@@ -685,11 +685,19 @@ namespace xscene::commands
                 else                  { ++nScenes;     ScenesConverted += std::format("  {:016X}\n", Value); }
             }
 
+            std::string Steps;                                       // the other plugins' files (m_Steps: a material instance's keyed overrides, ...)
+            const auto Descriptors = (std::filesystem::path(World().m_SceneMgr.m_ProjectPath) / L"Descriptors").wstring();
+            for (auto* pStep : m_Steps) Steps += pStep(Descriptors);
             return std::format("UpgradeProject: {} prefab(s) converted, {} left as they are (they cannot be read)\n{}{}{}{}"
-                               "UpgradeProject: {} scene(s) converted, {} left as they are\n{}{}{}{}"
+                               "UpgradeProject: {} scene(s) converted, {} left as they are\n{}{}{}{}{}"
                 , nConverted, nLeft, nConverted ? "Converted:\n" : "", Converted, nLeft ? "Left as they are:\n" : "", Left
-                , nScenes, nScenesLeft, nScenes ? "Scenes converted:\n" : "", ScenesConverted, nScenesLeft ? "Scenes left as they are:\n" : "", ScenesLeft);
+                , nScenes, nScenesLeft, nScenes ? "Scenes converted:\n" : "", ScenesConverted, nScenesLeft ? "Scenes left as they are:\n" : "", ScenesLeft
+                , Steps);
         }
+
+        // More old-format files to convert, from the plugins that know them (the editor that has this command adds them): each gets the project's
+        // "Descriptors" folder and returns its report lines
+        std::vector<std::string (*)(const std::wstring& Descriptors) noexcept> m_Steps;
     };
 }
 
