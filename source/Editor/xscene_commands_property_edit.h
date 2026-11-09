@@ -420,6 +420,12 @@ namespace xscene::commands
                 std::string CurrentValue;
                 if (!ReadPropertyText(Target, Path, TypeGuid, CurrentValue)) return "SetProperty: no such property";
             }
+            if (TypeGuid != 1)          // (a value that does not read as the type: refused, not set - setProperty aborted on it, C26 2026-11-09)
+            {
+                xproperty::any Check; std::string Copy = After;
+                if (!xproperty::settings::StringToAny(Check, TypeGuid, std::span<char>(Copy.data(), Copy.size())))
+                    return std::format("SetProperty: \"{}\" is not a value of the property's type ({:08X}) - e.g. a full guid is \"<instance hex>, <type hex>\"", After, TypeGuid);
+            }
 
             SetLivePropertyValue(Target, Path, TypeGuid, After);
             RecordPropertyOverride(SceneContext(), Target, SceneGuid, Id, Path, After);
