@@ -86,8 +86,23 @@ namespace xscene::commands
         return MigrateEntityComponentGuids(Ed, SceneGuid, Id, GuidsOf(Add), GuidsOf(Sub));
     }
 
+    // Plan C69: in a running world (Play) builder components (a collider) are consumed when an entity is created through the build plan; added
+    // to a live entity they are never built (no physics body) - the name of the first one Add would bring in, so the edit is refused instead
+    inline const char* BuilderAddedInPlay(scene_context& Ed, std::span<const xecs::component::type::guid> Add) noexcept
+    {
+        if (!Ed.World().areBuildersEnabled()) return nullptr;
+        for (const auto G : Add)
+            if (const auto* pInfo = xlioncore::Ecs(Ed.World()).FindComponentType(G); pInfo && pInfo->m_bBuilder) return pInfo->m_pName;
+        return nullptr;
+    }
+
     inline xecs::component::entity MigrateEntityComponentGuids(scene_context& Ed, xecs::scene::guid SceneGuid, xecs::scene::permanent_id Id, std::span<const xecs::component::type::guid> Add, std::span<const xecs::component::type::guid> Sub) noexcept
     {
+        if (const char* pName = BuilderAddedInPlay(Ed, Add))
+        {
+            std::printf("[Scene] refused: '%s' cannot be added while the game runs (it is built only when an entity is created: no physics body would exist) - add it in edit mode (plan C69)\n", pName);
+            return {};
+        }
         auto* pScene = Ed.World().m_SceneMgr.Find(SceneGuid);
         if (!pScene) return {};
         auto It = pScene->m_LocalToRuntime.find(Id);
@@ -290,6 +305,7 @@ namespace xscene::commands
             if (xecs::component::type::IsComponentType<xecs::editor::prefab_instance>(pInfo)) return "AddComponent: the prefab instance is the editor's own bookkeeping (made by InstantiatePrefab / MakePrefab), not a component to add";
 
             std::array<const xecs::component::type::info*, 1> Add{ pInfo };
+            if (World().areBuildersEnabled() && pInfo->m_bBuilder) return std::string("AddComponent: '") + pInfo->m_pName + "' cannot be added while the game runs (it is built only when an entity is created: no physics body would exist) - add it in edit mode";
             if (!MigrateEntityComponents(SceneContext(), SceneGuid, Id, Add, {}).isValid()) return "AddComponent: target not found";
             return {};
         }

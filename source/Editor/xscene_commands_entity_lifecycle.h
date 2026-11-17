@@ -639,6 +639,7 @@ namespace xscene::commands
                 xscene::ReparentEntityIntoFolder(*pScene, Id, FolderVal);
             }
 
+            if (const char* pName = BuilderAddedInPlay(SceneContext(), StartWith)) return std::string("CreateEntity: the entity was made, but '") + pName + "' cannot be added while the game runs (it is built only when an entity is created: no physics body would exist) - make it in edit mode (plan C69)";
             if (!StartWith.empty() && !MigrateEntityComponentGuids(SceneContext(), SceneGuid, Id, StartWith, {}).isValid()) return "CreateEntity: the entity was made but the components could not be added";
 
             State().m_bEntityInspectorDirty = true;
