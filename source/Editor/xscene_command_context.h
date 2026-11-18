@@ -187,6 +187,13 @@ namespace xscene::commands
         }
         if (!bIsAnyToStringSafeType(Data.getTypeGuid()))
             return sprintf_s(Buffer.data(), Buffer.size(), "<unsupported>");
+        // A string longer than the caller's buffer (a Ragdoll's 24-take RecoverClips: DescribeEntity's 256) asserted "Buffer too small" in the
+        // CRT and killed the editor: cut with "..." instead
+        if (Data.getTypeGuid() == xproperty::settings::var_type<std::string>::guid_v && Buffer.size() > 4)
+        {
+            const auto& S = Data.get<std::string>();
+            if (S.size() >= Buffer.size()) return sprintf_s(Buffer.data(), Buffer.size(), "%.*s...", int(Buffer.size() - 4), S.c_str());
+        }
         return xproperty::settings::AnyToString(Buffer, Data);
     }
 
