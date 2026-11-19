@@ -597,7 +597,9 @@ namespace xscene::commands
             if (ParentId != xecs::scene::invalid_permanent_id_v && !pScene->m_LocalToRuntime.contains(ParentId))
                 return "CreateEntity: parent not found";
 
-            auto Entity = xlioncore::CreateEntityOf<>(xlioncore::Ecs(World()));       // an entity with no component of its own, made inside the copy of the core the world belongs to
+            // made inside the copy of the core the world belongs to, with its components at once and through the build plan (C69: in Play a
+            // collider is built as when the game spawns it; added to a live entity later it never would be)
+            auto Entity = StartWith.empty() ? xlioncore::CreateEntityOf<>(xlioncore::Ecs(World())) : xlioncore::Ecs(World()).CreateEntityWith(StartWith, nullptr, nullptr);
             pScene->m_LocalToRuntime[Id]              = Entity;
             pScene->m_RuntimeToLocal[Entity.m_Value]  = Id;
             World().m_SceneMgr.MarkEntityNew(SceneGuid, Id);
@@ -639,8 +641,6 @@ namespace xscene::commands
                 xscene::ReparentEntityIntoFolder(*pScene, Id, FolderVal);
             }
 
-            if (const char* pName = BuilderAddedInPlay(SceneContext(), StartWith)) return std::string("CreateEntity: the entity was made, but '") + pName + "' cannot be added while the game runs (it is built only when an entity is created: no physics body would exist) - make it in edit mode (plan C69)";
-            if (!StartWith.empty() && !MigrateEntityComponentGuids(SceneContext(), SceneGuid, Id, StartWith, {}).isValid()) return "CreateEntity: the entity was made but the components could not be added";
 
             State().m_bEntityInspectorDirty = true;
             return {};

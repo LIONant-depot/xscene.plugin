@@ -262,5 +262,24 @@ namespace xscene::commands
 
         if (auto* pEcs = xlioncore::EditorOf(Ed.World())) pEcs->TeleportDynamicBody(It->second, Position, Rotation);        // through the xECSEditor of the world's own copy of the core
     }
+
+    // One property of a component's data (Path as the console names it, "Transform/Position/X") set from its text, the way SetProperty
+    // decodes it: the value's type is the property's own (enums by name). For data not yet in the world (an entity being made, C69)
+    inline bool SetDataPropertyText(void* pData, const xecs::component::type::info& Info, const std::string& Path, const std::string& Text) noexcept
+    {
+        if (!pData || !Info.m_pPropertyTable) return false;
+        xproperty::settings::context Context;
+        xproperty::any Current;
+        xproperty::sprop::collector(pData, *Info.m_pPropertyTable, Context, [&](const char* pName, xproperty::any&& Data, const xproperty::type::members&, bool, const void*) noexcept
+        {
+            if (Path == pName) Current = std::move(Data);
+        });
+        if (!Current.m_pType) return false;
+        xproperty::any Value; std::string Mutable = Text;
+        xproperty::settings::StringToAny(Value, Current.getTypeGuid(), std::span<char>(Mutable.data(), Mutable.size()));
+        std::string Error;
+        xproperty::sprop::setProperty(Error, pData, *Info.m_pPropertyTable, xproperty::sprop::container::prop{ Path, Value }, Context);
+        return Error.empty();
+    }
 }
 
